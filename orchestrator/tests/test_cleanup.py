@@ -1,6 +1,7 @@
 """Tests for cleanup.py — the orchestrator's own standalone copy of the
-frontend/analytics/cloud deletion logic (see cleanup.py's module doc
-comment for why there are two copies of this logic in this repo).
+analytics/cloud deletion logic (see cleanup.py's module doc comment for
+why there are two copies of this logic in this repo, and for why
+`frontend` is deliberately excluded).
 
 Same isolation approach as custom_components/willo's own tests for this
 logic: a fake tmp_path package tree, never the real installed
@@ -25,17 +26,32 @@ def _make_fake_homeassistant_package(tmp_path, components: list[str]):
     return tmp_path / "homeassistant"
 
 
-def test_deletes_frontend_analytics_and_cloud_when_present(tmp_path) -> None:
-    install_root = _make_fake_homeassistant_package(tmp_path, ["frontend", "analytics", "cloud", "light"])
+def test_deletes_analytics_and_cloud_when_present(tmp_path) -> None:
+    install_root = _make_fake_homeassistant_package(tmp_path, ["analytics", "cloud", "light"])
     fake_spec = SimpleNamespace(submodule_search_locations=[str(install_root)])
 
     with patch("willo_orchestrator.cleanup.importlib.util.find_spec", return_value=fake_spec):
         delete_stock_components()
 
-    assert not (install_root / "components" / "frontend").exists()
     assert not (install_root / "components" / "analytics").exists()
     assert not (install_root / "components" / "cloud").exists()
     assert (install_root / "components" / "light").exists()
+
+
+def test_frontend_is_never_touched(tmp_path) -> None:
+    """Regression test: deleting frontend crashes the NEXT `hass` launch —
+    see this repo's README, "Cleanup deletion" section. frontend must
+    survive this function untouched, no matter what.
+    """
+    install_root = _make_fake_homeassistant_package(tmp_path, ["frontend", "analytics", "cloud"])
+    fake_spec = SimpleNamespace(submodule_search_locations=[str(install_root)])
+
+    with patch("willo_orchestrator.cleanup.importlib.util.find_spec", return_value=fake_spec):
+        delete_stock_components()
+
+    assert (install_root / "components" / "frontend").exists()
+    assert not (install_root / "components" / "analytics").exists()
+    assert not (install_root / "components" / "cloud").exists()
 
 
 def test_missing_directories_are_a_silent_noop(tmp_path) -> None:

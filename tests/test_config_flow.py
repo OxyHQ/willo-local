@@ -109,8 +109,8 @@ async def test_claim_step_same_home_twice_aborts_already_configured(
     _async_finish_entry), verified here for the new claim step.
 
     (conftest.py's autouse fixture keeps the CREATE_ENTRY below from
-    triggering a real socketio connection or a real frontend/analytics/
-    cloud deletion against this test venv's own homeassistant install.)
+    triggering a real socketio connection or a real analytics/cloud
+    deletion against this test venv's own homeassistant install.)
     """
     first = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "claim"}, data={CONF_HOME_ID: "home_one", CONF_SECRET: "s1"}

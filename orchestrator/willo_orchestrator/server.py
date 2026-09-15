@@ -2,11 +2,18 @@
 willo-claim-ui Vite app as static files, plus GET /status, the local JSON
 endpoint that app polls roughly once a second (see willo-claim-ui/src/App.tsx).
 
-Per the Willo Local design (OxyHQ/Willo issue #9): since Core's own
-`frontend` is deleted, Core's HTTP surface is internal-only, so this
-orchestrator is the ONLY thing ever listening on the device's public-
-facing address (`willo.local` on real hardware; localhost:<port> in every
-sandbox test in this repo).
+Per the Willo Local design (OxyHQ/Willo issue #9): Core's own `frontend`
+is NOT deleted (see cleanup.py's module doc comment — deleting it crashes
+the next `hass` launch outright, and excluding it from configuration.yaml
+does not even stop it from running or serving HA's real onboarding
+wizard). Core's HTTP port must instead be made unreachable from outside
+this device at the network level — e.g. binding Core's own `http:`
+component to loopback only — for this orchestrator to be the ONLY thing
+externally reachable at the device's public-facing address (`willo.local`
+on real hardware; localhost:<port> in every sandbox test in this repo).
+That network-level restriction was verified to work (Core still answers
+on 127.0.0.1, refuses connections on any other interface) but is not yet
+wired into this repo — see the README's "Cleanup deletion" section.
 """
 
 from __future__ import annotations

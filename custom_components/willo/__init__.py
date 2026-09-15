@@ -56,21 +56,50 @@ _LOGGER = logging.getLogger(__name__)
 
 # Willo Local (see OxyHQ/Willo issue #9): the device itself must never show
 # Home Assistant's own UI or branding. Rather than fork Core or ship a
-# patched OS image, this integration physically deletes these three stock
+# patched OS image, this integration physically deletes these stock
 # components from the installed `homeassistant` package on every boot —
 # self-healing against a Core update that restores them. Tested against a
 # real `homeassistant` pip install to confirm nothing else in stock Core
-# imports from `frontend`/`analytics`/`cloud` at import time (see this
-# repo's README for the exact command and findings); if a future HA
-# version changes that, `_delete_stock_components` below still can't crash
-# setup — it only ever logs and moves on.
-_STOCK_COMPONENTS_TO_REMOVE = ("frontend", "analytics", "cloud")
+# imports from `analytics`/`cloud` at import time in a way that would break
+# (see this repo's README for the exact command and findings); if a future
+# HA version changes that, `_delete_stock_components` below still can't
+# crash setup — it only ever logs and moves on.
+#
+# `frontend` is DELIBERATELY EXCLUDED from this list — do not add it back.
+# Deleting `frontend` was tried and reverted after real testing: HA's own
+# `homeassistant/bootstrap.py` unconditionally imports `homeassistant.
+# components.config` at module level (a performance pre-import, nothing to
+# do with configuration.yaml), and `config/__init__.py` imports `frontend`
+# at ITS top level — so once `frontend`'s files are gone, the very next
+# `hass` process launch crashes outright with `ImportError: cannot import
+# name 'frontend' from 'homeassistant.components'`, before Core's own
+# recovery-mode logic can even run. This was proven twice: manually, and
+# through a full onboarding→cleanup→claim→pair→restart run whose next
+# `hass` launch crashed with that exact traceback (see this repo's README,
+# "Cleanup deletion" section). Excluding `frontend` from
+# `configuration.yaml` does NOT avoid this either and does not even stop
+# `frontend` from running — HA's `bootstrap._get_domains()` unconditionally
+# merges `DEFAULT_INTEGRATIONS` (which includes `"frontend"`) into every
+# non-recovery-mode boot regardless of `configuration.yaml`'s content, and
+# recovery mode force-includes `frontend` too — confirmed by booting HA
+# with `frontend:` absent from an explicit `configuration.yaml` and
+# getting a real `302 → /onboarding.html` serving HA's actual onboarding
+# wizard HTML anyway. See the README for the full writeup and the
+# network-level mitigation (binding Core's own `http:` to loopback only)
+# that was verified to actually achieve "unreachable from outside this
+# device" instead — not yet wired into this integration pending a design
+# decision, since it changes configuration.yaml, not this file.
+_STOCK_COMPONENTS_TO_REMOVE = ("analytics", "cloud")
 
 
 def _delete_stock_components() -> None:
-    """Delete frontend/, analytics/, and cloud/ from the installed
-    homeassistant package so this device never shows HA's own UI — even
-    after a Core update restores them, since this runs on every boot.
+    """Delete analytics/ and cloud/ from the installed homeassistant
+    package so this device never phones home to Nabu Casa's cloud
+    services or Home Assistant's own analytics collection — even after a
+    Core update restores them, since this runs on every boot. (`frontend`
+    is NOT deleted here — see the module-level comment on
+    `_STOCK_COMPONENTS_TO_REMOVE` above for why, and this repo's README
+    for the underlying finding.)
 
     The install path is resolved via `importlib`, never hardcoded, so this
     survives HA version bumps that change the install layout (venv vs.
@@ -78,15 +107,15 @@ def _delete_stock_components() -> None:
 
     This function must NEVER raise. A missing directory (already deleted,
     or a future HA release renaming/removing the component), a permission
-    error, or any other failure is logged as a warning and skipped —
-    deleting HA's own UI is defense-in-depth, not a precondition for the
-    tunnel itself working, and must never block integration setup.
+    error, or any other failure is logged as a warning and skipped — this
+    is defense-in-depth, not a precondition for the tunnel itself working,
+    and must never block integration setup.
     """
     spec = importlib.util.find_spec("homeassistant")
     if spec is None or not spec.submodule_search_locations:
         _LOGGER.warning(
             "Could not resolve the installed homeassistant package via importlib; "
-            "skipping frontend/analytics/cloud cleanup this boot"
+            "skipping analytics/cloud cleanup this boot"
         )
         return
 

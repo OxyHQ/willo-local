@@ -4,7 +4,7 @@ sequence from OxyHQ/Willo issue #9:
     1. serve the built willo-claim-ui app + GET /status               (server.py)
     2. poll localhost:8123 until Core's REST API answers               (ha_client.py)
     3. drive HA onboarding via REST                                    (ha_client.py)
-    4. delete frontend/analytics/cloud (belt-and-suspenders)           (cleanup.py)
+    4. delete analytics/cloud (belt-and-suspenders)                    (cleanup.py)
     5. POST /tunnel/claim, poll GET /tunnel/claim/status                (willo_client.py)
     6. write the willo config entry directly, restart Core              (ha_entry.py)
     7. status.stage tracks every real transition above, live            (status.py)
@@ -13,6 +13,12 @@ Every environment-specific value is a WILLO_* env var — nothing about a
 real device's HA config directory or address is hardcoded here (see
 AGENTS.md's "Environment configuration" — this repo follows it too, even
 though it predates that file).
+
+Step 4 deliberately does NOT delete `frontend` — see cleanup.py's module
+doc comment and this repo's README ("Cleanup deletion") for why that was
+tried, reverted, and is not safe to reintroduce: it crashes the next
+`hass` launch outright, and excluding `frontend` from `configuration.yaml`
+does not even stop it from running.
 """
 
 from __future__ import annotations
