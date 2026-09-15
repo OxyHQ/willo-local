@@ -52,20 +52,27 @@ factory-provisioned Home Assistant Green boots straight into a
 Willo-branded status screen (`willo-claim-ui/`, a small Vite app) driven by
 a persistent on-device process (`orchestrator/`) that:
 
-1. serves the built claim UI + a local `GET /status`
+1. serves the built claim UI + a local `GET /status`, bound to a real
+   network interface (`WILLO_HOST`, `0.0.0.0` by default) — independent of
+   anything below, see "Cleanup deletion" for why that independence
+   matters
 2. polls Core's REST API until it's up
-3. drives HA's real onboarding REST API (creates a throwaway
-   `willo-svc-<hex>` admin, finishes the core_config/analytics/integration
-   steps)
-4. deletes `analytics`/`cloud` from the installed `homeassistant` package
+3. completes onboarding's "user" step (the only one that needs no
+   pre-existing auth) to get an admin token
+4. writes `configuration.yaml`'s explicit integration allow-list +
+   loopback-only `http:` binding if it doesn't already match, and — only
+   if it changed — restarts Core and resumes once it's back up
+5. drives the rest of HA's onboarding REST API (core_config/analytics/
+   integration steps)
+6. deletes `analytics`/`cloud` from the installed `homeassistant` package
    (belt-and-suspenders — `frontend` is deliberately NOT deleted; see
    "Cleanup deletion" below for why)
-5. calls the real Willo backend's `POST /tunnel/claim` /
+7. calls the real Willo backend's `POST /tunnel/claim` /
    `GET /tunnel/claim/status`, falling back to a clearly-logged local mock
    if that backend isn't reachable
-6. writes the `willo` config entry directly into
+8. writes the `willo` config entry directly into
    `.storage/core.config_entries` and restarts Core
-7. `GET /status` reflects every one of these stages live:
+9. `GET /status` reflects every one of these stages live:
    `onboarding → syncing → awaiting-pairing → paired`
 
 Run it locally:
@@ -154,14 +161,9 @@ This went through three real, tested iterations, in this order:
    no other host on the network can reach it at all — while
    `curl http://127.0.0.1:8123/` from the same device still worked
    (`302`), meaning the orchestrator (which runs on the same device) is
-   unaffected. **This is the verified path to "no HA UI ever reachable
-   from outside this device" — it is NOT yet wired into this repo. Adding
-   `server_host: 127.0.0.1` to whatever `configuration.yaml` the
-   orchestrator writes/manages is a real, concrete next step, but a
-   deliberate one to confirm before building — it changes the shape of
-   Core's own config, and how real HAOS's Supervisor/Ingress already
-   manages `http:` bindings could not be verified in this sandbox (see
-   the open items below).**
+   unaffected. **This is the mechanism actually implemented — see
+   "Loopback binding" below for the full wiring and the real
+   non-loopback reachability proof.**
 
 `analytics` is separately force-attempted on every boot regardless of
 `configuration.yaml`, same mechanism as `frontend` (`DEFAULT_INTEGRATIONS`
@@ -185,9 +187,73 @@ dependency of `hassio` — checked, `hassio`'s manifest only depends on
 `_STOCK_COMPONENTS_TO_REMOVE`/`STOCK_COMPONENTS_TO_REMOVE` in both files,
 permanently, with the finding above in a comment directly above that
 constant so it doesn't get silently reintroduced. Every failure is still
-caught and logged, never raised. The network-binding mitigation for
-`frontend` itself is verified but not yet implemented — flagging this as
-the concrete next decision rather than guessing at it.
+caught and logged, never raised. Reachability is handled separately, at
+the network level — see below.
+
+### Loopback binding — the implemented, verified mechanism for "no HA UI ever reachable from outside this device"
+
+`orchestrator/willo_orchestrator/ha_config.py`'s `ensure_explicit_configuration`
+writes a fixed `configuration.yaml` (explicit `api:`/`config:`/`http:`
+allow-list, never `default_config:`, `http: { server_port: 8123,
+server_host: 127.0.0.1 }`) and reports whether it changed anything.
+`main.py`'s boot sequence calls it right after onboarding's "user" step
+(the only step that needs no pre-existing auth — a factory-fresh device
+has no admin account before it), and only restarts Core if the file
+actually changed, resuming the rest of onboarding once Core is back up.
+`orchestrator/willo_orchestrator/server.py`'s own HTTP server is entirely
+separate — bound to `WILLO_HOST` (`0.0.0.0` by default), never touched by
+anything in `ha_config.py`.
+
+**Verified for real, both halves of the claim, from a genuinely
+non-loopback address — not just `127.0.0.1`, which would be trivial and
+prove nothing:**
+
+```
+$ ss -ltnp | grep -E "8123|8098"
+LISTEN 0 128     0.0.0.0:8098 0.0.0.0:*  users:(("python3",pid=...))   # orchestrator
+LISTEN 0 128   127.0.0.1:8123 0.0.0.0:*  users:(("hass",pid=...))      # Core
+
+$ curl -m5 http://192.168.8.50:8123/          # Core, via the sandbox machine's real LAN IP
+curl: (7) Failed to connect to 192.168.8.50 port 8123 after 0 ms: Could not connect to server
+
+$ curl -m5 -o /dev/null -w '%{http_code}\n' http://192.168.8.50:8098/status   # orchestrator, same IP
+200
+
+$ curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8123/    # Core, loopback — still works
+200
+```
+
+192.168.8.50 is this sandbox machine's own `eth0` address (confirmed via
+`ip addr` / `hostname -I`) — not a second physical host, since none was
+available, but connecting to a box's own non-loopback interface address
+exercises the identical kernel socket-accept path a genuinely remote host
+would: a `listen()` socket bound to `127.0.0.1` refuses every inbound
+connection that doesn't arrive via the loopback interface, regardless of
+where the connecting process physically runs. `curl: (7) ... Could not
+connect` is a real, OS-level connection refusal, not an HTTP-level
+response of any kind — there is no 404, no panel, nothing "frontend-
+shaped" to see, exactly the standard the coordinator asked this be held
+to.
+
+**Sequencing caveat, found and worth knowing**: the mid-onboarding
+restart (step 4 above) was first tested starting from a `default_config:`
+initial file (simulating "whatever a naive auto-generated config might
+look like"), and Core hung for several minutes without ever completing
+that restart — no crash, no `ImportError`, just no progress (low but
+nonzero CPU use, nothing in the log past a `homeassistant.loader.
+IntegrationNotFound: Integration 'cloud' not found` error from what looks
+like a leftover discovery/flow-init task from `default_config:`'s much
+larger component set). Re-tested starting from an already-explicit-list
+file (just missing `server_host`) — the realistic case, since a real
+Willo Local device should ship with the explicit list baked into its
+image from the start, never `default_config:` — and the restart completed
+in about 3 seconds, every time. Not chased further: it's a plausible real
+robustness gap (an unbounded initial `configuration.yaml` state could in
+principle hang a real device's first boot) but not the scenario this
+orchestrator is actually designed to run into, and chasing a synthetic
+`default_config:`-specific hang felt like solving a problem this design
+doesn't actually have. Worth remembering if a future change makes this
+restart path reachable from a less-controlled starting state.
 
 ### Re-verification after dropping frontend deletion
 
@@ -303,6 +369,16 @@ or Docker Core install:**
   in this task could confirm whether the real `willo-local` add-on will
   have access to Core's installed package path at all — flagging this
   plainly rather than assuming it "just works" on real hardware.
+- Whether real HAOS's own Supervisor/Ingress needs Core's `http:` bound to
+  something other than loopback to keep working. Supervisor's Ingress
+  feature (the mechanism HAOS normally uses to reach Core's UI through
+  Supervisor's own reverse proxy) may expect to reach Core directly on its
+  usual interface/port — binding Core to `127.0.0.1` only could plausibly
+  conflict with that on real hardware in a way a plain venv Core (with no
+  Supervisor process at all) cannot surface. This sandbox proved the
+  binding itself works exactly as intended for a bare Core process; it
+  cannot prove Supervisor is fine with it. A real HAOS Green is needed to
+  confirm this one way or the other before shipping.
 
 No code in this repository or its tests ever attempted to reach real Home
 Assistant Green / HAOS hardware or the user's home network — every test

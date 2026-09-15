@@ -3,7 +3,10 @@ sequence from OxyHQ/Willo issue #9:
 
     1. serve the built willo-claim-ui app + GET /status               (server.py)
     2. poll localhost:8123 until Core's REST API answers               (ha_client.py)
-    3. drive HA onboarding via REST                                    (ha_client.py)
+    2a. complete onboarding's "user" step (the only unauthenticated one) (ha_client.py)
+    2b. write configuration.yaml's explicit allow-list + loopback       (ha_config.py)
+        http binding; restart Core if that file changed, then resume
+    3. drive the rest of HA onboarding via REST                        (ha_client.py)
     4. delete analytics/cloud (belt-and-suspenders)                    (cleanup.py)
     5. POST /tunnel/claim, poll GET /tunnel/claim/status                (willo_client.py)
     6. write the willo config entry directly, restart Core              (ha_entry.py)
@@ -18,7 +21,17 @@ Step 4 deliberately does NOT delete `frontend` — see cleanup.py's module
 doc comment and this repo's README ("Cleanup deletion") for why that was
 tried, reverted, and is not safe to reintroduce: it crashes the next
 `hass` launch outright, and excluding `frontend` from `configuration.yaml`
-does not even stop it from running.
+does not even stop it from running or serving its real UI — which is
+exactly why step 2b's loopback binding exists: it's the mechanism that
+was actually verified to make Core's HTTP surface unreachable from
+outside this device (see ha_config.py and the README).
+
+Step 2b runs BEFORE the rest of onboarding, right after the "user" step,
+because it needs an authenticated token to call the restart service and a
+factory-fresh device has no admin account until that one step completes —
+and it runs there rather than after the whole of onboarding so Core is
+never, even briefly, reachable from the network with onboarding still
+in progress.
 """
 
 from __future__ import annotations
@@ -34,6 +47,7 @@ import aiohttp
 from . import cleanup
 from .const import DEFAULT_CLAIM_STATUS_URL, DEFAULT_CLAIM_URL, DEFAULT_HA_BASE_URL
 from .ha_client import HAClient, HAClientError
+from .ha_config import ensure_explicit_configuration
 from .ha_entry import has_willo_entry, write_willo_entry
 from .server import run_server
 from .status import new_status
@@ -51,36 +65,28 @@ def _env_path(name: str, default: str) -> Path:
     return Path(os.environ.get(name, default))
 
 
-async def _drive_onboarding(ha: HAClient, *, base_url: str) -> str:
-    """Runs all four onboarding steps, in order, only for the ones not
-    already marked done — idempotent, since a crash/restart mid-onboarding
-    must be able to resume rather than fail forever on "step already done".
+async def _complete_user_step(ha: HAClient, *, base_url: str) -> dict[str, str]:
+    """Onboarding's "user" step — the only one that needs no pre-existing
+    auth, since a factory-fresh device has no admin account yet. Returns
+    the token dict from exchanging its auth_code (has "access_token" and
+    "refresh_token").
 
-    Returns a refresh_token: the boot sequence needs a valid access token
-    much later too (to call the homeassistant.restart service after the
-    claim completes), and onboarding's own access token is only valid for
-    30 minutes — easily outlasted by a real person taking their time to
-    open the Willo app and tap "claim". The refresh token is what lets the
-    orchestrator mint a fresh one right before it's actually needed.
+    Not idempotent by design: there is no HA REST endpoint to fetch a
+    fresh auth_code for an already-onboarded user, so this orchestrator
+    cannot resume past this exact point without its own persisted token.
+    Out of scope to solve generically here; the sandbox tests in this
+    repo always run onboarding start-to-finish in one pass. Raises if
+    this step is already marked done.
     """
     onboarding_status = await ha.get_onboarding_status()
     done_steps = {step["step"] for step in onboarding_status if step["done"]}
-
-    client_id = f"{base_url}/"
-    redirect_uri = f"{base_url}/"
-
     if "user" in done_steps:
-        # Already done (a resumed/crashed earlier run) — there is no HA
-        # REST endpoint to fetch a fresh auth_code for an already-onboarded
-        # user, so this orchestrator cannot resume past this exact point
-        # without its own persisted token. Out of scope to solve generically
-        # here; the sandbox tests in this repo always run onboarding
-        # start-to-finish in one pass.
         raise HAClientError(
             "Onboarding's 'user' step is already done but no access token was persisted — "
             "cannot resume onboarding from this exact point"
         )
 
+    client_id = f"{base_url}/"
     username = f"willo-svc-{secrets.token_hex(4)}"
     password = secrets.token_urlsafe(24)
     auth_code = await ha.create_admin_user(
@@ -88,8 +94,19 @@ async def _drive_onboarding(ha: HAClient, *, base_url: str) -> str:
     )
     _LOGGER.info("Created throwaway HA admin user %s", username)
 
-    tokens = await ha.exchange_auth_code(auth_code=auth_code, client_id=client_id)
-    access_token = tokens["access_token"]
+    return await ha.exchange_auth_code(auth_code=auth_code, client_id=client_id)
+
+
+async def _complete_remaining_onboarding_steps(ha: HAClient, *, base_url: str, access_token: str) -> None:
+    """core_config, analytics, integration — run only for the ones not
+    already marked done, so a crash/restart between these three can
+    resume rather than fail forever on "step already done".
+    """
+    onboarding_status = await ha.get_onboarding_status()
+    done_steps = {step["step"] for step in onboarding_status if step["done"]}
+
+    client_id = f"{base_url}/"
+    redirect_uri = f"{base_url}/"
 
     if "core_config" not in done_steps:
         await ha.finish_core_config_step(access_token=access_token)
@@ -99,8 +116,6 @@ async def _drive_onboarding(ha: HAClient, *, base_url: str) -> str:
         await ha.finish_integration_step(access_token=access_token, client_id=client_id, redirect_uri=redirect_uri)
 
     _LOGGER.info("Onboarding complete")
-    refresh_token: str = tokens["refresh_token"]
-    return refresh_token
 
 
 async def async_main() -> None:
@@ -132,7 +147,27 @@ async def async_main() -> None:
                 _LOGGER.info("A willo config entry already exists in %s — nothing left to do", ha_config_dir)
                 status.stage = "paired"
             else:
-                refresh_token = await _drive_onboarding(ha, base_url=ha_base_url)
+                tokens = await _complete_user_step(ha, base_url=ha_base_url)
+                access_token = tokens["access_token"]
+                refresh_token = tokens["refresh_token"]
+
+                if ensure_explicit_configuration(ha_config_dir):
+                    _LOGGER.info(
+                        "configuration.yaml did not match the explicit allow-list + loopback-only "
+                        "http binding — wrote it and restarting Core to apply it"
+                    )
+                    await ha.restart_core(access_token=access_token)
+                    await ha.wait_until_api_down()
+                    await ha.wait_until_api_ready()
+                    # A fresh token: restarting Core is exactly the kind of
+                    # real elapsed time (plus a brand new process) that
+                    # makes re-minting one safer than assuming the old
+                    # access_token is still good.
+                    access_token = await ha.refresh_access_token(refresh_token=refresh_token, client_id=f"{ha_base_url}/")
+                else:
+                    _LOGGER.info("configuration.yaml already matches the explicit allow-list — no restart needed")
+
+                await _complete_remaining_onboarding_steps(ha, base_url=ha_base_url, access_token=access_token)
 
                 status.stage = "syncing"
                 await asyncio.get_running_loop().run_in_executor(None, cleanup.delete_stock_components)

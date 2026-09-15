@@ -56,6 +56,28 @@ class HAClient:
             await asyncio.sleep(poll_interval_seconds)
         raise HAClientError(f"Core's REST API never became ready at {self._base_url}") from last_error
 
+    async def wait_until_api_down(self, *, poll_interval_seconds: float = 1.0, timeout_seconds: float = 60.0) -> None:
+        """Poll until Core's REST API stops answering.
+
+        Needed between "trigger a restart" and "wait_until_api_ready again":
+        without this, a poll fired immediately after the restart service
+        call can still hit the OLD process while it's mid-shutdown (its
+        HTTP server doesn't stop instantly) and wrongly conclude the NEW
+        process is already up. If Core never goes down within the timeout
+        (e.g. this call raced ahead of the restart actually being
+        processed), this is a soft no-op — the caller's own
+        wait_until_api_ready afterward is still correct either way, just
+        without this extra safety margin.
+        """
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                async with self._session.get(f"{self._base_url}/api/", timeout=aiohttp.ClientTimeout(total=2)):
+                    pass
+            except (aiohttp.ClientError, TimeoutError):
+                return
+            await asyncio.sleep(poll_interval_seconds)
+
     async def get_onboarding_status(self) -> list[dict[str, Any]]:
         async with self._session.get(f"{self._base_url}/api/onboarding") as response:
             if response.status != 200:

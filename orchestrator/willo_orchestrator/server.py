@@ -6,14 +6,16 @@ Per the Willo Local design (OxyHQ/Willo issue #9): Core's own `frontend`
 is NOT deleted (see cleanup.py's module doc comment — deleting it crashes
 the next `hass` launch outright, and excluding it from configuration.yaml
 does not even stop it from running or serving HA's real onboarding
-wizard). Core's HTTP port must instead be made unreachable from outside
-this device at the network level — e.g. binding Core's own `http:`
-component to loopback only — for this orchestrator to be the ONLY thing
-externally reachable at the device's public-facing address (`willo.local`
-on real hardware; localhost:<port> in every sandbox test in this repo).
-That network-level restriction was verified to work (Core still answers
-on 127.0.0.1, refuses connections on any other interface) but is not yet
-wired into this repo — see the README's "Cleanup deletion" section.
+wizard). Instead, `ha_config.py`'s `ensure_explicit_configuration` binds
+Core's own `http:` component to loopback only (`server_host: 127.0.0.1`),
+verified to make Core's HTTP surface unreachable from any interface but
+loopback — while THIS server binds to `WILLO_HOST` (0.0.0.0 by default, a
+real network interface), independently and unaffected by that setting, so
+this orchestrator is the ONLY thing externally reachable at the device's
+public-facing address (`willo.local` on real hardware; the sandbox
+machine's real LAN IP in this repo's own end-to-end tests — see the
+README's "Cleanup deletion" section for the exact commands that proved
+both halves of that claim).
 """
 
 from __future__ import annotations
