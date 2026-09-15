@@ -1,5 +1,7 @@
 import { QRCodeSVG } from 'qrcode.react'
 import './App.css'
+import { connectHomeAssistantAnimation } from './lottie/connect-home-assistant-animation'
+import { ThemedLottie } from './lottie/ThemedLottie'
 import { useOrchestratorStatus, type OrchestratorStage } from './useOrchestratorStatus'
 
 const STAGE_MESSAGE: Record<OrchestratorStage, string> = {
@@ -14,6 +16,12 @@ function App() {
 
   return (
     <main className="screen">
+      {/* The same "waiting to connect Home Assistant" animation the main
+          Willo app plays at this exact moment in its own onboarding — see
+          src/lottie/connect-home-assistant-animation.ts — for visual
+          continuity between the app side and the device side of one flow.
+          Replaces the earlier text-only wordmark placeholder. */}
+      <ThemedLottie animation={connectHomeAssistantAnimation} className="logo" />
       <h1 className="wordmark">Willo</h1>
 
       {status.error !== null ? (

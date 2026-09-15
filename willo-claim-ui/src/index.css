@@ -1,6 +1,17 @@
+/* Bloom's canonical design tokens (the Tailwind alias layer — this app has
+   no Tailwind build step, so these `--color-x: var(--x)` declarations are
+   inert here, but importing it is the same precedent
+   packages/frontend/global.css follows for any future consumer that does
+   add Tailwind). The REAL raw values (--primary, --background, --card, ...)
+   come from ./bloom-theme.css below — see that file's own doc comment and
+   scripts/generate-bloom-theme.ts for why a static file, not this import,
+   is what actually supplies them. */
+@import "@oxy.so/bloom/design-tokens/theme.css";
+@import "./bloom-theme.css";
+
 :root {
   color-scheme: light dark;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--bloom-font-sans, system-ui, "Segoe UI", Roboto, sans-serif);
 }
 
 * {
@@ -15,6 +26,6 @@ body,
 }
 
 body {
-  background: #0b0c10;
-  color: #f4f4f5;
+  background: var(--background);
+  color: var(--foreground);
 }
