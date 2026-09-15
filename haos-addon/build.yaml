@@ -1,0 +1,9 @@
+# Pins the real, current official Home Assistant add-on base image — the
+# same one home-assistant/addons/configurator/build.yaml uses (a real,
+# currently-published add-on in the official repo), not invented. This
+# image ships s6-overlay v3 and bashio already installed, on Alpine Linux
+# (hence the Dockerfile's `apk add`, not `apt`).
+---
+build_from:
+  amd64: ghcr.io/home-assistant/amd64-base:3.24-2026.06.1
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.24-2026.06.1

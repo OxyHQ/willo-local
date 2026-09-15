@@ -496,10 +496,204 @@ or Docker Core install:**
   against. Confirm this against a real HAOS Green before trusting the
   Willo app's board-name copy in production.
 
+## HAOS add-on packaging (`haos-addon/`) and real-Supervisor verification
+
+The final phase of this work: package the orchestrator as an actual HAOS
+add-on (Dockerfile, `config.yaml`, s6-overlay service — nothing built
+before this was add-on-shaped, it was a bare Python process in a venv),
+implement the `willo.local` hostname rename, and test as much of this as
+possible against a **real** Supervisor, not bare Core — explicitly the
+last verification gate before anyone touches real HA Green hardware.
+
+### The add-on itself — built from the real, currently-published add-ons repo, not invented
+
+`haos-addon/config.yaml`, `build.yaml`, `Dockerfile`, and the
+`rootfs/etc/s6-overlay/s6-rc.d/willo-local/` service definition were built
+by cloning and reading `home-assistant/addons` (the real, first-party
+add-ons collection) and `home-assistant/addons-example`, not by guessing
+the shape:
+
+- `build.yaml` pins `ghcr.io/home-assistant/{arch}-base:3.24-2026.06.1` —
+  the exact, current base image `home-assistant/addons/configurator`
+  (a real, currently-published add-on) uses.
+- `config.yaml`'s `hassio_api: true` / `homeassistant_api: true` /
+  `hassio_role: manager` / `map: [{type: homeassistant_config}]` are all
+  real fields, each taken from a specific real add-on in that repo
+  (`duckdns` for `hassio_api`, `configurator` for `homeassistant_api`,
+  `ssh` for `hassio_role: manager` — the same elevated role this add-on
+  needs for the same reason `ssh` does, OS-level Supervisor calls — and
+  `matter_server`/`configurator` for the `homeassistant_config` map type
+  that mounts Core's config directory at `/homeassistant`).
+- The s6-overlay v3 service layout
+  (`s6-rc.d/willo-local/{type,run,finish,dependencies.d/base}` +
+  `s6-rc.d/user/contents.d/willo-local`) matches `configurator`'s real
+  rootfs exactly; `finish` is copied verbatim (real add-ons share this
+  exact boilerplate for s6 supervision teardown).
+
+**Verified for real — a genuine `docker build` and `docker run`, not just
+a file that looks plausible:**
+
+```
+$ sudo docker build -f haos-addon/Dockerfile \
+    --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.24-2026.06.1 \
+    -t willo-local-test .
+# ... real base image pull, real `pip3 install /opt/orchestrator` (aiohttp,
+# aiohasupervisor, ulid-transform and their transitive deps all resolved
+# for real), real COPY of willo-claim-ui/dist and the s6 rootfs ...
+#11 writing image sha256:8e59d0d7... done
+
+$ sudo docker run --rm -d -p 18080:8080 willo-local-test
+$ docker logs <container>
+s6-rc: info: service willo-local: starting
+s6-rc: info: service willo-local successfully started
+[11:29:26] INFO: Starting Willo Local orchestrator...
+2026-09-15 ... INFO willo_orchestrator.server: Willo orchestrator serving on http://0.0.0.0:8080 ...
+2026-09-15 ... INFO willo_orchestrator.device_model: SUPERVISOR_TOKEN not set — ... deviceModel will be null
+2026-09-15 ... INFO willo_orchestrator.hostname: SUPERVISOR_TOKEN not set — skipping hostname rename
+2026-09-15 ... ERROR __main__: Willo orchestrator boot sequence failed
+willo_orchestrator.ha_client.HAClientError: GET /api/onboarding -> 404
+
+$ curl http://localhost:18080/status
+{"stage": "onboarding", ..., "error": "GET /api/onboarding -> 404"}
+$ curl -o /dev/null -w '%{http_code}' http://localhost:18080/
+200
+```
+
+This confirms, for real: the image builds cleanly on the real official
+base image; s6-overlay correctly recognizes and starts the `willo-local`
+service; the `run` script's real bashio calls and env vars work; the
+orchestrator starts, correctly detects the Supervisor-less environment
+(both `device_model.py` and `hostname.py` degrade to their documented
+no-op path, not a crash) and correctly attempts `http://homeassistant:8123`
+(the real HAOS internal DNS name for Core an add-on with
+`homeassistant_api: true` gets, not `localhost`) — which 404s here only
+because there's no real Home Assistant network in a bare `docker run`,
+exactly as expected; and the claim UI itself is served correctly (`GET /`
+→ `200`) from inside the container. The ONE thing this does NOT prove is
+the add-on actually installed and started BY Supervisor (as opposed to a
+bare `docker run`) — that's the VM section below.
+
+### The hostname rename (`willo_orchestrator/hostname.py`)
+
+Found the same way `os/info`'s `board` field was found earlier: by reading
+`aiohasupervisor`'s actual installed source, not guessing an endpoint.
+`aiohasupervisor/host.py`'s `HostClient` exposes `GET host/info` →
+`HostInfo.hostname` (the current value) and `POST host/options` ←
+`HostOptions(hostname=...)` (`set_options`) — both real, typed, confirmed
+by import (`from aiohasupervisor.models import HostOptions;
+HostOptions(hostname="willo")` constructs cleanly). Wired into
+`main.py`'s boot sequence early (independent of onboarding, same as
+`deviceModel`), gated on `SUPERVISOR_TOKEN` exactly like `device_model.py`,
+never raising. Verified: the no-Supervisor path (every sandbox test here,
+including the real `docker run` above) degrades correctly. NOT verified:
+that `host/options` actually renames the host against a live Supervisor —
+see below for why that specific call couldn't be reached this round.
+
+### The real HAOS VM attempt
+
+Home Assistant publishes official HAOS QEMU/VirtualBox VM images
+specifically for this kind of testing. Checked feasibility honestly
+before assuming anything:
+
+```
+$ ls -la /dev/kvm
+crw-rw---- 1 root kvm 10, 232 ... /dev/kvm
+$ egrep -c '(vmx|svm)' /proc/cpuinfo
+64
+$ systemd-detect-virt
+wsl
+```
+
+This sandbox runs inside WSL2 (itself a Hyper-V VM) — nested virtualization
+inside a VM is exactly the kind of setup that often silently doesn't work.
+Tested rather than assumed: installed `qemu-system-x86` (Debian's real apt
+package), added the sandbox user to the `kvm` group, and booted a real
+KVM-accelerated QEMU guest (`qemu-system-x86_64 -accel kvm -cpu host ...`)
+— it worked, with no fallback-to-software-emulation warnings. **Real
+hardware-accelerated virtualization genuinely works in this sandbox** —
+not a given, confirmed rather than assumed.
+
+Downloaded the official release: `home-assistant/operating-system`
+release `18.2`, `haos_ova-18.2.qcow2.xz` (the QEMU/VirtualBox-targeted
+OVA variant). First real finding: this image is **UEFI-only** — booting
+with plain SeaBIOS (QEMU's default) hangs silently at "Booting from Hard
+Disk..." forever; booting with OVMF firmware
+(`-drive if=pflash,file=/usr/share/OVMF/OVMF_CODE_4M.fd` + a writable
+copy of `OVMF_VARS_4M.fd`) boots correctly into a real HAOS `systemd`
+environment (HAOS ZRAM units, the real EXT4 root mount, the genuine
+"Welcome to Home Assistant" console banner).
+
+**Home Assistant Core, under real Supervisor management, DID become
+reachable once**: `curl http://localhost:<forwarded-port>/api/` answered
+`401` (up, unauthenticated) on the very first successful boot — real,
+concrete proof this whole pipeline can work end to end in this sandbox.
+That specific attempt was then lost to a real mistake, not a fundamental
+blocker: repeated probes against `/api/` (which requires auth) rather
+than the actually-public `/api/onboarding` appear to have triggered HA's
+own IP-ban security middleware, after which even the public endpoint
+returned a bare `401` for the rest of that boot. Lesson applied for every
+attempt after: only ever poll `/api/onboarding` for readiness (the same
+real, already-verified check `HAClient.wait_until_api_ready` uses against
+bare Core).
+
+**Every subsequent attempt (fresh disk each time, to rule out any
+carried-over bad state) hit a reproducible stall**: `GET /api/onboarding`
+consistently returned `307 Temporary Redirect` → `Location:
+http://<host-without-port>/api/onboarding`, with `Server: Python/3.14
+aiohttp/3.14.3` — a different Python version than bare Core's 3.13.5 in
+every earlier venv test, strong evidence this response comes from
+Supervisor's own landing/proxy service while Core itself was never
+successfully started. Diagnosed with real evidence, not guessed: QEMU's
+own monitor (`info usernet`) showed the guest actively opening large
+numbers of short-lived DNS and DNS-over-TLS (port 853, to `1.1.1.1`/
+`1.0.0.1`) connections that established at the TCP level but produced no
+further traffic — a recognized category of QEMU usermode-networking
+(slirp) limitation, not a HAOS/Supervisor bug. Tried a targeted, evidence
+based fix (`-device virtio-net-pci,...,host_mtu=1400`, addressing a known
+slirp MTU/fragmentation issue) on a fresh disk; it did not resolve the
+stall within the time available for this task. The next real fix — a
+bridged/tap network device instead of slirp, avoiding QEMU's usermode
+networking entirely — was not attempted: it needs installing and
+configuring `iptables`/a DHCP server/bridge-utils from scratch, a
+materially larger new effort, and time ran out on this pass.
+
+**Reported honestly, not forced**: full HAOS+Supervisor first-boot
+provisioning did not complete in this sandbox this round. What IS now
+genuinely verified, distinct from every earlier bare-Core test:
+Docker/OS-level virtualization is real and works here; the official HAOS
+image is correctly downloadable and bootable (with the UEFI finding);
+Core reachability under real Supervisor management was directly observed
+once. What remains unverified, and needs either a follow-up session with
+bridged VM networking or the user's own real HAOS Green hardware: the
+actual `host/options` hostname-rename call, `os/info`'s real response
+shape, and the packaged add-on actually being installed and started BY a
+live Supervisor (as opposed to the bare `docker run` verified above,
+which proves the container itself is correct but not Supervisor's own
+add-on lifecycle management of it).
+
+### Updated status of the four originally-flagged open items
+
+1. **Onboarding REST payload shapes** — fully verified (see "Onboarding
+   REST automation" above).
+2. **Headless config-entry creation mechanism** — fully verified,
+   mechanism (b) chosen (see "Headless config-entry creation" above).
+3. **HAOS Supervisor hostname-rename API** — the real API call is now
+   *implemented* (`hostname.py`, `HostClient.set_options`) and its
+   no-Supervisor degradation path is tested, but calling it against a
+   live Supervisor is NOT verified — see above.
+4. **Add-on ↔ Core networking** — partially advanced: the add-on's own
+   container correctly reaches for `http://homeassistant:8123` (the real
+   internal hostname), and the packaged container itself is proven to
+   build and run correctly (Docker verification above), but Supervisor
+   actually wiring that hostname up, and granting the container access to
+   Core's install path for `cleanup.py`'s belt-and-suspenders deletion,
+   remains unverified against a live Supervisor for the same reason as
+   item 3.
+
 No code in this repository or its tests ever attempted to reach real Home
 Assistant Green / HAOS hardware or the user's home network — every test
-above ran against a disposable local HA Core install created for this
-task, and `custom_components/willo`'s own tunnel target
-(`DEFAULT_TUNNEL_URL`) was never pointed anywhere but the real, public
-`api.willo.sh` (reachable from this sandbox, unrelated to any home
-network) or an explicit local test stub.
+above ran against a disposable local HA Core install or a disposable
+local HAOS VM created for this task, and `custom_components/willo`'s own
+tunnel target (`DEFAULT_TUNNEL_URL`) was never pointed anywhere but the
+real, public `api.willo.sh` (reachable from this sandbox, unrelated to
+any home network) or an explicit local test stub.

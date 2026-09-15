@@ -1,0 +1,57 @@
+# Real HAOS add-on manifest fields, confirmed against the actual,
+# currently-published home-assistant/addons repo (configurator, duckdns,
+# matter_server, ssh) rather than invented — see this repo's README,
+# "HAOS add-on packaging" section, for exactly which real add-on each
+# field below was taken from.
+---
+name: Willo Local
+version: "0.1.0"
+slug: willo-local
+description: >-
+  Willo Local's on-device orchestrator: drives headless onboarding, binds
+  Core's own HTTP surface to loopback only, and serves the Willo claim UI
+  as the device's only public-facing HTTP surface. See
+  https://github.com/OxyHQ/Willo/issues/9.
+url: "https://github.com/OxyHQ/willo-ha/tree/main/haos-addon"
+arch:
+  - amd64
+  - aarch64
+# hassio_api: Supervisor's own REST API — os/info (board model, for
+#   deviceModel) and host/options (the hostname rename). See
+#   willo_orchestrator/device_model.py and hostname.py.
+# homeassistant_api: network reachability + a Core-scoped token — this
+#   add-on does its OWN onboarding via Core's unauthenticated
+#   /api/onboarding/users (no admin exists yet on a fresh device, so
+#   nothing pre-provisioned can help there), but still needs the network
+#   path to Core (the `homeassistant` hostname) this flag grants.
+# hassio_role: manager — host/options (hostname rename) and os/info are
+#   OS-level Supervisor calls; the default role does not cover these (see
+#   the real "ssh" add-on, which needs the same elevated role for its own
+#   OS-level work — home-assistant/addons/ssh/config.yaml).
+hassio_api: true
+homeassistant_api: true
+hassio_role: manager
+init: false
+startup: services
+# homeassistant_config: mounts Core's own config directory (where
+# configuration.yaml and .storage/core.config_entries live) at
+# /homeassistant inside this add-on's container — real map type, from
+# home-assistant/addons/matter_server/config.yaml and (as
+# homeassistant_config:rw) ssh/configurator's config.yaml.
+map:
+  - type: homeassistant_config
+    read_only: false
+# Published, not host_network: true — this add-on only needs ITS OWN
+# claim-UI port reachable on the device's real network interface, not
+# full host networking (matter_server needs host_network for multicast
+# discovery; this add-on doesn't do multicast, so the narrower, more
+# standard `ports:` publish is the right level of access, not the
+# broadest one available).
+ports:
+  8080/tcp: 8080
+ports_description:
+  8080/tcp: >-
+    The Willo claim UI + GET /status — this device's ONLY public HTTP
+    surface once Core's own http: is bound to loopback (see
+    willo_orchestrator/ha_config.py).
+image: "ghcr.io/oxyhq/willo-local-{arch}"

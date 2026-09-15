@@ -2,6 +2,9 @@
 sequence from OxyHQ/Willo issue #9:
 
     1. serve the built willo-claim-ui app + GET /status               (server.py)
+    1a. detect the board model (deviceModel) and rename the host to     (device_model.py,
+        "willo" via Supervisor, both independent of onboarding — a       hostname.py)
+        no-op under Supervisor-less installs (every sandbox test here)
     2. poll localhost:8123 until Core's REST API answers               (ha_client.py)
     2a. complete onboarding's "user" step (the only unauthenticated one) (ha_client.py)
     2b. write configuration.yaml's explicit allow-list + loopback       (ha_config.py)
@@ -51,6 +54,7 @@ from . import cleanup
 from .const import DEFAULT_CLAIM_STATUS_URL, DEFAULT_CLAIM_URL, DEFAULT_HA_BASE_URL
 from .device_model import detect_device_model
 from .ha_client import HAClient, HAClientError
+from .hostname import set_device_hostname
 from .ha_config import ensure_explicit_configuration
 from .ha_entry import has_willo_entry, write_willo_entry
 from .server import run_server
@@ -140,10 +144,15 @@ async def async_main() -> None:
     status = new_status()
     runner = await run_server(status, static_dir, host=host, port=port)
 
-    # Independent of the onboarding/pairing state machine below — the
-    # Willo app's auto-detect screen wants this as soon as it's available,
-    # not gated behind onboarding completing.
+    # Both independent of the onboarding/pairing state machine below.
+    # deviceModel: the Willo app's auto-detect screen wants this as soon as
+    # it's available, not gated behind onboarding completing. Hostname:
+    # renaming to willo.local doesn't depend on Core being onboarded either
+    # — it's a Supervisor-only, OS-level change — and doing it early means
+    # the device advertises its real name for as much of the boot sequence
+    # as possible.
     status.device_model = await detect_device_model()
+    await set_device_hostname()
 
     try:
         async with aiohttp.ClientSession() as session:

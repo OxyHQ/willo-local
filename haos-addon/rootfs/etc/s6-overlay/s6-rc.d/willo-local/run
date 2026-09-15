@@ -1,0 +1,18 @@
+#!/command/with-contenv bashio
+# vim: ft=bash
+# shellcheck shell=bash
+# ==============================================================================
+# Start the Willo Local orchestrator
+# ==============================================================================
+bashio::log.info "Starting Willo Local orchestrator..."
+
+# Real HAOS internal hostnames/paths for an add-on with homeassistant_api
+# and the homeassistant_config map — NOT localhost/a bare relative path,
+# since this runs in its own container, separate from Core's.
+export WILLO_HA_BASE_URL="http://homeassistant:8123"
+export WILLO_HA_CONFIG_DIR="/homeassistant"
+export WILLO_STATIC_DIR="/opt/willo-claim-ui-dist"
+export WILLO_HOST="0.0.0.0"
+export WILLO_PORT="8080"
+
+exec python3 -m willo_orchestrator.main
