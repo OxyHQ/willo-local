@@ -1,0 +1,25 @@
+[project]
+name = "willo-orchestrator"
+version = "0.1.0"
+description = "Willo Local's on-device orchestrator — onboarding, cleanup, device claim, and the claim UI's HTTP surface."
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9",
+    "ulid-transform>=1.0",
+]
+
+[project.scripts]
+willo-orchestrator = "willo_orchestrator.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["willo_orchestrator*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]

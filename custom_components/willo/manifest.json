@@ -1,0 +1,12 @@
+{
+  "domain": "willo",
+  "name": "Willo",
+  "version": "0.1.0",
+  "documentation": "https://github.com/OxyHQ/willo-ha",
+  "issue_tracker": "https://github.com/OxyHQ/willo-ha/issues",
+  "codeowners": ["@OxyHQ"],
+  "requirements": ["python-socketio[asyncio_client]>=5.11,<6"],
+  "iot_class": "cloud_push",
+  "config_flow": true,
+  "integration_type": "hub"
+}

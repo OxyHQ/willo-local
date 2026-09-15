@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Willo",
+        "description": "Open the Willo app, create a home, and enter the pairing code it shows you.",
+        "data": {
+          "code": "Pairing code"
+        }
+      }
+    },
+    "error": {
+      "invalid_code": "That pairing code is invalid or has expired. Generate a new one in the Willo app and try again.",
+      "cannot_connect": "Could not reach Willo. Check this device's internet connection and try again.",
+      "unknown": "Something went wrong. Try again."
+    },
+    "abort": {
+      "already_configured": "This Home Assistant instance is already connected to a Willo home.",
+      "claim_requires_data": "The claim step requires a home_id and secret; it cannot be started interactively.",
+      "claim_invalid_data": "The claim step received an invalid or incomplete home_id/secret payload."
+    }
+  }
+}

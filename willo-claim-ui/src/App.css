@@ -1,0 +1,67 @@
+.screen {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.wordmark {
+  /* Placeholder wordmark: plain text, no brand asset for this pass — see
+     OxyHQ/Willo issue #9's UI section, which explicitly calls a
+     text-based placeholder fine for this stage. */
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.statusLine {
+  font-size: clamp(1.1rem, 3vw, 1.4rem);
+  color: #a1a1aa;
+  margin: 0;
+}
+
+.statusLine--error {
+  color: #f87171;
+}
+
+.claimCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem;
+  border-radius: 1rem;
+  background: #17181d;
+}
+
+.qrWrapper {
+  background: #fff;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  line-height: 0;
+}
+
+.claimCode {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: clamp(1.8rem, 6vw, 2.6rem);
+  letter-spacing: 0.15em;
+  margin: 0;
+}
+
+.claimHint {
+  font-size: 0.95rem;
+  color: #a1a1aa;
+  margin: 0;
+  max-width: 26rem;
+}
+
+.pairedCheck {
+  font-size: 4rem;
+  color: #4ade80;
+  margin: 0;
+}

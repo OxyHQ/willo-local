@@ -1,0 +1,7 @@
+{
+  "name": "Willo",
+  "content_in_root": false,
+  "iot_class": "Cloud Push",
+  "render_readme": true,
+  "homeassistant": "2024.1.0"
+}
