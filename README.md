@@ -671,6 +671,69 @@ live Supervisor (as opposed to the bare `docker run` verified above,
 which proves the container itself is correct but not Supervisor's own
 add-on lifecycle management of it).
 
+#### Follow-up retry: bridged TAP networking instead of slirp (still unresolved)
+
+Asked to retry specifically because this sandbox runs inside WSL2, a
+possible source of stacked NAT/MTU issues on top of QEMU's own slirp
+layer. Checked rather than assumed:
+
+```
+$ grep -i networkingMode /mnt/c/Users/*/.wslconfig
+networkingMode=mirrored
+```
+
+WSL2 itself is in **mirrored** networking mode here — there is no
+WSL2-level NAT stacked on top of slirp; slirp was always the only NAT
+layer involved, which narrowed the problem back to QEMU itself.
+
+Built a real bridged-TAP replacement for slirp instead of another MTU
+tweak: a private Linux bridge (`br-willo`, `10.99.99.1/24`) with a TAP
+device (`tap-willo`) attached, kernel `ip_forward` + `iptables -t nat
+MASQUERADE` out the sandbox's real uplink, and `dnsmasq` bound to the
+bridge for real DHCP + DNS (forwarding to `1.1.1.1`/`8.8.8.8`) — this
+makes the guest a normal peer on a real bridge rather than double-NATed,
+which was the specific concern raised. Booted the HAOS image against
+this (fresh disk, OVMF/UEFI as before, `-netdev tap,ifname=tap-willo`).
+
+This produced genuinely different, more promising behavior than every
+slirp attempt: a real DHCP lease in ~2 seconds, and (on the first,
+4096MB-RAM run) **719MB of real inbound data transfer** through the
+bridge's `FORWARD` chain — slirp attempts never moved meaningful data
+before hanging. But the same `307`/no-Core-yet symptom still appeared
+afterward, and a 5-minute wait showed the `FORWARD` byte counters frozen
+and QEMU at 0% CPU — a genuine stall, just reached differently than the
+slirp DNS-over-TLS hang.
+
+Hypothesized memory pressure (QEMU's RSS was at ~4.0GB of the 4096MB
+allocated — right at the ceiling) and retested on a fresh disk with
+`-m 8192` (8GB) as one bounded final attempt. Result: the same stall
+reproduced, just later and at a higher plateau — RSS climbed to and then
+sat flat at ~8.41GB from roughly t=105s onward, while CPU decayed
+smoothly and predictably from ~81% down through the 40s% over the next
+several minutes, the same shape as the 4GB run's decay into its stall,
+not a different failure mode. **This rules out memory pressure as the
+cause** — doubling available RAM delayed the stall but did not prevent
+it, so whatever is actually happening is not simply "ran out of memory."
+
+Net result of this retry: real, concrete progress (mirrored WSL2
+networking confirmed as a non-factor; TAP/bridge networking confirmed to
+move real, substantial data where slirp never did; the memory-pressure
+hypothesis tested and ruled out) but the underlying stall itself is
+**still not resolved**. The most likely remaining suspects — none
+confirmed, since there is no console/SSH access into the guest to
+observe what is actually stuck — are: Supervisor's own container-image
+pull hitting a slower-but-still-limited path even over the bridge, or an
+internal retry/backoff loop (e.g. the same class of DNS-over-TLS
+behavior seen under slirp, now happening at the container-runtime level
+inside the guest rather than at QEMU's network layer) that simply takes
+longer to reach than the 4-6 minutes attempted here. Getting further
+would need either serial-console/SSH access into the guest to see what
+is actually blocked, or substantially longer unattended wait times than
+were spent on this task — a genuinely different, larger effort than a
+retry, not a quick fix. Per the explicit instruction not to chase this
+indefinitely, stopped here and cleaned up the VM/bridge/TAP/dnsmasq
+infrastructure rather than continuing further.
+
 ### Updated status of the four originally-flagged open items
 
 1. **Onboarding REST payload shapes** — fully verified (see "Onboarding
