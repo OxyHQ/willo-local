@@ -42,19 +42,35 @@ def build_app(status: OrchestratorStatus, static_dir: Path) -> web.Application:
     app.router.add_get("/status", handle_status)
 
     if static_dir.is_dir():
-        app.router.add_static("/", static_dir, show_index=False)
-        # SPA fallback: any path that isn't a real static file (there are
-        # none besides "/" for this single-screen app, but a person
-        # refreshing on a deep link should still see the app, not a 404)
-        # serves index.html.
         index_path = static_dir / "index.html"
+        resolved_static_dir = static_dir.resolve()
 
-        async def handle_spa_fallback(request: web.Request) -> web.Response:
+        # A single handler for every path, deliberately NOT using
+        # add_static: aiohttp's add_static("/", ...) is a prefix resource
+        # that claims every path under "/", including "/" itself (a
+        # directory-root request, which 403s with show_index=False) and
+        # every unknown deep link (its own 404) — neither case ever falls
+        # through to a route registered after it. Confirmed live setting
+        # up this exact code for a demo: a browser hitting "/" got a bare
+        # 403, not the claim UI. Handling every path in one function sidesteps
+        # that router-ordering quirk entirely: serve a real file if the
+        # requested path resolves to one inside static_dir, otherwise serve
+        # index.html (covers "/" and any future deep link the same way).
+        async def handle_path(request: web.Request) -> web.Response:
+            tail = request.match_info.get("tail", "")
+            candidate = (static_dir / tail).resolve()
+            try:
+                candidate.relative_to(resolved_static_dir)
+            except ValueError:
+                return web.Response(status=403, text="Forbidden")
+            if candidate.is_file():
+                return web.FileResponse(candidate)
             if index_path.is_file():
                 return web.FileResponse(index_path)
             return web.Response(status=404, text="willo-claim-ui build not found")
 
-        app.router.add_get("/{tail:.*}", handle_spa_fallback)
+        app.router.add_get("/", handle_path)
+        app.router.add_get("/{tail:.*}", handle_path)
     else:
         _LOGGER.warning(
             "willo-claim-ui build directory %s does not exist — only /status will respond. "

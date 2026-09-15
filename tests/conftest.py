@@ -27,7 +27,7 @@ def _prevent_real_side_effects_from_async_setup_entry():
     """Any test that drives a Willo config flow to CREATE_ENTRY (both
     async_step_user and async_step_claim can) causes the config entries
     manager to immediately call async_setup_entry for real. That function
-    does two things no test should ever do for real:
+    does three things no test should ever do for real:
 
     1. _delete_stock_components() — deletes analytics/cloud (NOT frontend
        — see __init__.py's module-level comment on
@@ -46,7 +46,11 @@ def _prevent_real_side_effects_from_async_setup_entry():
        tree — it must never run un-mocked here, since even analytics/cloud
        alone are real files in this venv's own HA install that a test run
        has no business deleting as a side effect.
-    2. sio.connect(...) — a real outbound socketio connection attempt to
+    2. _replace_frontend_with_stub() — same story as above, but would
+       overwrite the real frontend/__init__.py and manifest.json in this
+       venv's own HA install with the stub instead of deleting them. Has
+       its own dedicated, isolated tests in test_frontend_stub.py.
+    3. sio.connect(...) — a real outbound socketio connection attempt to
        api.willo.sh, which is slow, flaky in a sandboxed test environment,
        and irrelevant to what config_flow/init tests are checking.
 
@@ -56,6 +60,7 @@ def _prevent_real_side_effects_from_async_setup_entry():
     """
     with (
         patch("custom_components.willo._delete_stock_components"),
+        patch("custom_components.willo._replace_frontend_with_stub"),
         patch("custom_components.willo.socketio.AsyncClient.connect", new=AsyncMock()),
     ):
         yield

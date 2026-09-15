@@ -51,6 +51,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 
 from .const import CONF_HOME_ID, CONF_SECRET, DEFAULT_TUNNEL_URL, DOMAIN, TUNNEL_NAMESPACE
+from .frontend_stub import STUB_INIT_PY, STUB_MANIFEST_JSON
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -134,6 +135,52 @@ def _delete_stock_components() -> None:
                     component_dir,
                     exc_info=True,
                 )
+
+
+def _replace_frontend_with_stub() -> None:
+    """Replace the installed `frontend` component's files with an inert
+    stub (see frontend_stub.py for the full rationale and the fragility
+    caveat) — defense-in-depth on TOP of loopback binding (see
+    orchestrator/willo_orchestrator/ha_config.py), never a substitute for
+    it. Runs alongside _delete_stock_components, as a SEPARATE step with
+    its own try/except: a failure here must never affect the analytics/
+    cloud deletion above, or vice versa, and must never block integration
+    setup.
+
+    Unlike _delete_stock_components, this does not simply remove
+    `frontend` — that crashes the next `hass` launch (see this module's
+    comment above _STOCK_COMPONENTS_TO_REMOVE). It replaces the directory
+    contents with two files that keep the SAME importable module path and
+    the same symbols other stock code needs, so nothing that imports
+    `frontend` fails — those imports just get inert no-ops instead of a
+    real, HTTP-serving component.
+    """
+    spec = importlib.util.find_spec("homeassistant")
+    if spec is None or not spec.submodule_search_locations:
+        _LOGGER.warning(
+            "Could not resolve the installed homeassistant package via importlib; "
+            "skipping the frontend stub swap this boot"
+        )
+        return
+
+    for install_root in spec.submodule_search_locations:
+        frontend_dir = Path(install_root) / "components" / "frontend"
+        try:
+            if frontend_dir.is_dir():
+                shutil.rmtree(frontend_dir)
+            frontend_dir.mkdir(parents=True, exist_ok=True)
+            (frontend_dir / "__init__.py").write_text(STUB_INIT_PY)
+            (frontend_dir / "manifest.json").write_text(STUB_MANIFEST_JSON)
+            _LOGGER.info("Willo: replaced the 'frontend' component with an inert stub at %s", frontend_dir)
+        except OSError:
+            _LOGGER.warning(
+                "Willo: failed to replace the 'frontend' component with a stub at %s — "
+                "leaving the real component in place (loopback binding is still the load-bearing "
+                "protection either way)",
+                frontend_dir,
+                exc_info=True,
+            )
+
 
 # The domains Willo's UI knows how to render. An entity in any other domain
 # (automations, scripts, switches, climate, …) is dropped, not sent with
@@ -236,9 +283,12 @@ def _snapshot_devices(hass: HomeAssistant) -> list[dict[str, Any]]:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # Runs unconditionally, before anything else, on every single boot —
-    # see _delete_stock_components' doc comment above.
+    # Both run unconditionally, before anything else, on every single boot
+    # — see _delete_stock_components' and _replace_frontend_with_stub's
+    # own doc comments above. Two separate calls, deliberately: a failure
+    # in one must never affect the other.
     await hass.async_add_executor_job(_delete_stock_components)
+    await hass.async_add_executor_job(_replace_frontend_with_stub)
 
     home_id: str = entry.data[CONF_HOME_ID]
     secret: str = entry.data[CONF_SECRET]

@@ -6,6 +6,11 @@ export interface OrchestratorStatus {
   stage: OrchestratorStage
   claimCode: string | null
   qrDataUrl: string | null
+  // The detected HA board model ("Green", "Yellow", ...) — this screen
+  // doesn't display it (the Willo app's own "Connect Home Assistant"
+  // auto-detect screen is the consumer that cares), but the field is
+  // real and part of the same /status contract, so it's typed here too.
+  deviceModel: string | null
   error: string | null
 }
 
@@ -15,6 +20,7 @@ const INITIAL_STATUS: OrchestratorStatus = {
   stage: 'onboarding',
   claimCode: null,
   qrDataUrl: null,
+  deviceModel: null,
   error: null,
 }
 

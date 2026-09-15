@@ -7,7 +7,10 @@ sequence from OxyHQ/Willo issue #9:
     2b. write configuration.yaml's explicit allow-list + loopback       (ha_config.py)
         http binding; restart Core if that file changed, then resume
     3. drive the rest of HA onboarding via REST                        (ha_client.py)
-    4. delete analytics/cloud (belt-and-suspenders)                    (cleanup.py)
+    4. delete analytics/cloud, replace frontend with an inert stub      (cleanup.py)
+       (belt-and-suspenders — loopback binding in step 2b is the
+       load-bearing reachability mechanism; the stub swap is
+       defense-in-depth layered on top, not a substitute for it)
     5. POST /tunnel/claim, poll GET /tunnel/claim/status                (willo_client.py)
     6. write the willo config entry directly, restart Core              (ha_entry.py)
     7. status.stage tracks every real transition above, live            (status.py)
@@ -46,6 +49,7 @@ import aiohttp
 
 from . import cleanup
 from .const import DEFAULT_CLAIM_STATUS_URL, DEFAULT_CLAIM_URL, DEFAULT_HA_BASE_URL
+from .device_model import detect_device_model
 from .ha_client import HAClient, HAClientError
 from .ha_config import ensure_explicit_configuration
 from .ha_entry import has_willo_entry, write_willo_entry
@@ -136,6 +140,11 @@ async def async_main() -> None:
     status = new_status()
     runner = await run_server(status, static_dir, host=host, port=port)
 
+    # Independent of the onboarding/pairing state machine below — the
+    # Willo app's auto-detect screen wants this as soon as it's available,
+    # not gated behind onboarding completing.
+    status.device_model = await detect_device_model()
+
     try:
         async with aiohttp.ClientSession() as session:
             ha = HAClient(session, base_url=ha_base_url)
@@ -170,7 +179,13 @@ async def async_main() -> None:
                 await _complete_remaining_onboarding_steps(ha, base_url=ha_base_url, access_token=access_token)
 
                 status.stage = "syncing"
-                await asyncio.get_running_loop().run_in_executor(None, cleanup.delete_stock_components)
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, cleanup.delete_stock_components)
+                # Defense-in-depth on top of ha_config.py's loopback binding
+                # (the load-bearing mechanism) — see cleanup.py and
+                # frontend_stub.py for why this is a separate, independently
+                # fail-safe step.
+                await loop.run_in_executor(None, cleanup.replace_frontend_with_stub)
 
                 claim_client = WilloClaimClient(session, claim_url=claim_url, claim_status_url=claim_status_url)
                 claim = await claim_client.request_claim()

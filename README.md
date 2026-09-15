@@ -73,7 +73,13 @@ a persistent on-device process (`orchestrator/`) that:
 8. writes the `willo` config entry directly into
    `.storage/core.config_entries` and restarts Core
 9. `GET /status` reflects every one of these stages live:
-   `onboarding → syncing → awaiting-pairing → paired`
+   `onboarding → syncing → awaiting-pairing → paired` — and separately,
+   as soon as it's known (not gated behind onboarding), a `deviceModel`
+   field ("Green", "Yellow", `null` off-Supervisor) the Willo app's own
+   auto-detect screen reads directly, without this orchestrator's own
+   claim UI ever displaying it — see `device_model.py` and the open
+   items below for what's verified and what still needs real HAOS
+   hardware
 
 Run it locally:
 
@@ -255,6 +261,99 @@ orchestrator is actually designed to run into, and chasing a synthetic
 doesn't actually have. Worth remembering if a future change makes this
 restart path reachable from a less-controlled starting state.
 
+### Inert frontend stub — defense-in-depth layered on top, not a substitute
+
+Loopback binding alone satisfies "no HA UI ever reachable from outside
+this device" — that's the load-bearing guarantee. But the user wanted the
+actual footprint gone where practical, not merely hidden behind a network
+restriction, so `custom_components/willo/frontend_stub.py` and
+`orchestrator/willo_orchestrator/frontend_stub.py` (identical content,
+duplicated the same way the rest of this cleanup logic is — see those
+files) replace the installed `frontend` component's files with an inert
+stub: same importable module path, same symbols other stock code needs,
+but `async_setup`, `async_register_built_in_panel`, `async_remove_panel`,
+and `async_system_store` all do nothing real — no HTTP views, no static
+assets, no wizard, no dashboard.
+
+**The complete, exhaustive symbol list this stub needed to reproduce**,
+found by grepping the entire installed `homeassistant==2026.2.3` package
+for every `from homeassistant.components import frontend` and
+`from homeassistant.components.frontend import X`, then every
+`frontend.` attribute access in each matching file:
+
+- `DATA_PANELS` (a `HassKey`, read/written by `lovelace/__init__.py`,
+  `lovelace/dashboard.py`)
+- `MANIFEST_JSON` (subscript-only, `mobile_app/webhook.py`)
+- `async_register_built_in_panel` (called by `config`, `hassio`,
+  `history`, `logbook`, `lovelace`, `my`, `todo`, `panel_custom`,
+  `media_source`, `energy`, `calendar` — same signature reproduced
+  exactly, including the keyword-only `update`/`config_panel_domain`
+  params some call sites use)
+- `async_remove_panel` (`hassio/addon_panel.py`, `lovelace/__init__.py`)
+- `async_system_store` (`lovelace/__init__.py` — only reached inside a
+  storage-migration function that early-returns on any fresh install with
+  no pre-existing lovelace storage; stubbed anyway, defensively)
+- the `"frontend.reload_themes"` service (referenced by name, not import,
+  from `homeassistant`'s own `reload_all` service)
+
+Confirmed `onboarding` (what this orchestrator's own automation depends
+on entirely) has zero references to `frontend` anywhere in its source or
+manifest — the stub cannot break onboarding automation because nothing
+about onboarding touches frontend in the first place.
+
+**Verified for real, both in isolation and through the full pipeline:**
+
+- Manual swap into a real installed package, 5 consecutive `hass`
+  relaunches: every boot healthy, zero crashes, zero `ImportError`.
+  `frontend` reports as a genuinely loaded component
+  (`"frontend" in components` → `true` via authenticated `GET
+  /api/config`) — not missing, just inert.
+- With Core's `http:` deliberately NOT loopback-restricted for this one
+  check (to isolate "is frontend inert" from "is it unreachable" — two
+  different guarantees): `GET /`, `GET /onboarding.html`, `GET
+  /manifest.json`, `GET /static/icons/favicon.ico` all returned a plain
+  generic `404: Not Found` — nothing "frontend-shaped" served at all.
+- Full onboarding → user step → config write+restart → remaining
+  onboarding → analytics/cloud deletion **and** frontend stub swap →
+  claim → headless entry write → final restart → paired, re-run through
+  the real orchestrator with both mechanisms wired in together, reaching
+  `paired` cleanly (orchestrator log shows all three: `deleted stock
+  'analytics'`, `deleted stock 'cloud'`, `replaced the 'frontend'
+  component with an inert stub`).
+- 5 more consecutive `hass` relaunches on that resulting paired,
+  loopback-bound, stub-frontend config directory, each cycle checked
+  independently (distinct PID per cycle, confirmed killed before the
+  next): all healthy, and on every single cycle — both
+  `curl http://192.168.8.50:8123/` (external) refused the connection AND
+  `curl http://127.0.0.1:8123/` (loopback, i.e. what the stub alone
+  controls) returned `404` — the two layers holding simultaneously,
+  every time.
+
+**Fragility, flagged as plainly as asked**: `frontend`'s internals are
+not a documented, stable public API — `frontend` is an
+`integration_type: system` component, and nothing about `DATA_PANELS`'s
+type, `async_register_built_in_panel`'s signature, or which symbols exist
+at all is guaranteed across HA releases the way `http: server_host` (a
+real, documented, user-facing config key) is. This symbol list is only as
+correct as the HA 2026.2.3 snapshot it was derived from. The most likely
+failure mode on a future HA version that adds a new stock component
+importing a new frontend symbol is that ONE component logging a soft
+"Setup failed for X" error — the same category of degradation already
+accepted for the analytics/cloud deletion — not a repeat of the
+frontend-deletion crash, since nothing about `bootstrap.py`'s own hard
+import of `config` (which only needs `frontend` to exist and expose what
+`config/__init__.py` touches) changes. Still: **this is measurably more
+fragile than loopback binding**, and re-deriving this symbol list (same
+grep commands as above) is a real, recurring maintenance cost on every
+future HA version bump this project targets — worth budgeting for, not
+a one-time cost. Both stub-writing functions are wrapped in their own
+try/except, entirely separate from the analytics/cloud deletion's: if
+writing or swapping the stub fails for any reason, or a future HA version
+makes the stub itself incompatible in some way that surfaces as an
+exception, the fallback is exactly "as if this stub didn't exist" —
+loopback binding remains the load-bearing, unaffected guarantee either
+way.
+
 ### Re-verification after dropping frontend deletion
 
 All of the below is a second, independent pass, done after the finding
@@ -379,6 +478,23 @@ or Docker Core install:**
   binding itself works exactly as intended for a bare Core process; it
   cannot prove Supervisor is fine with it. A real HAOS Green is needed to
   confirm this one way or the other before shipping.
+- `deviceModel` detection (`orchestrator/willo_orchestrator/device_model.py`,
+  for the Willo app's own "Connect Home Assistant" auto-detect screen,
+  which reads `GET /status`'s `deviceModel` field to say "Found a Willo
+  Green" instead of assuming every appliance is one). What IS verified:
+  `aiohasupervisor` (Supervisor's real, typed Python client, already an
+  installed dependency of the stock `hassio` integration — inspected
+  directly in this sandbox, not remembered from memory) exposes
+  `SupervisorClient(api_host, token).os.info()` → `OSInfo.board: str |
+  None` via `GET os/info`, and this module correctly returns `None`
+  without raising when `SUPERVISOR_TOKEN` isn't set (every sandbox test
+  here) or when `http://supervisor` is unreachable — both real,
+  tested behaviors. What is NOT verified: an actual Supervisor's real
+  response shape and whether `http://supervisor` / `SUPERVISOR_TOKEN`
+  behave exactly as HAOS's own add-on documentation describes — there is
+  no Supervisor at all in a plain venv/Docker Core sandbox to check
+  against. Confirm this against a real HAOS Green before trusting the
+  Willo app's board-name copy in production.
 
 No code in this repository or its tests ever attempted to reach real Home
 Assistant Green / HAOS hardware or the user's home network — every test
