@@ -47,11 +47,23 @@ map:
 # discovery; this add-on doesn't do multicast, so the narrower, more
 # standard `ports:` publish is the right level of access, not the
 # broadest one available).
+#
+# Port 80, not 8080: http://willo.local with no port typed in is the
+# actual product requirement for a real appliance. Binding it needs no
+# extra capability grant — this container runs as root by default (the
+# official base image never drops to a non-root user, and neither does
+# this add-on's own Dockerfile), which is the same, real convention the
+# official "ssh" add-on uses for its own sub-1024 port (22): verified
+# against the real, currently-published home-assistant/addons/ssh
+# Dockerfile (no USER directive) and config.yaml (no `privileged:` field
+# at all) — root-by-default, not an explicit NET_BIND_SERVICE grant, is
+# the actual normal pattern here, not an invented shortcut.
 ports:
-  8080/tcp: 8080
+  80/tcp: 80
 ports_description:
-  8080/tcp: >-
+  80/tcp: >-
     The Willo claim UI + GET /status — this device's ONLY public HTTP
     surface once Core's own http: is bound to loopback (see
-    willo_orchestrator/ha_config.py).
+    willo_orchestrator/ha_config.py). Port 80 specifically so
+    http://willo.local needs no port typed in.
 image: "ghcr.io/oxyhq/willo-local-{arch}"

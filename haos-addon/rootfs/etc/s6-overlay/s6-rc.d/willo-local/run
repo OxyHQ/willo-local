@@ -12,7 +12,17 @@ bashio::log.info "Starting Willo Local orchestrator..."
 export WILLO_HA_BASE_URL="http://homeassistant:8123"
 export WILLO_HA_CONFIG_DIR="/homeassistant"
 export WILLO_STATIC_DIR="/opt/willo-claim-ui-dist"
+# Port 80, not 8080: a real appliance shouldn't need a port typed in
+# (http://willo.local, not http://willo.local:8080). This container runs
+# as root by default (the official HAOS base image never drops to a
+# non-root user, and neither does this add-on's own Dockerfile), which is
+# also the real, confirmed convention other HAOS add-ons that bind a
+# sub-1024 port use — e.g. the official "ssh" add-on binds port 22 the
+# same way, with no `privileged:` capability grant in its config.yaml at
+# all (verified against the real, currently-published
+# home-assistant/addons/ssh/config.yaml and Dockerfile) — so no extra
+# capability grant is needed here either.
 export WILLO_HOST="0.0.0.0"
-export WILLO_PORT="8080"
+export WILLO_PORT="80"
 
 exec python3 -m willo_orchestrator.main

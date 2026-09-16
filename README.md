@@ -823,24 +823,133 @@ have this gap (Supervisor always relaunches Core), so this was worked
 around for these tests only with a small shell loop that relaunches
 `hass` whenever it exits — test infrastructure, not a code change.
 
+## Real Home Assistant Green deployment
+
+With the existing-install safety fix verified in the sandbox, this add-on
+was actually installed on the user's real, daily-used Home Assistant
+Green (with their and the coordinator's explicit review of the exact plan
+before anything touched the device). Read-only recon first (board/model,
+Supervisor version, `configuration.yaml` size, existing config entries,
+port usage), then an offline dry-run of `has_meaningful_existing_configuration()`
+against a copy of the real `configuration.yaml` (returned `True`, deleted
+the copy immediately after), then the actual install: a self-contained
+package (this repo's `orchestrator/` + `willo-claim-ui/dist/` + `haos-addon/`'s
+rootfs/config, repackaged so Supervisor's local-add-on build — which
+always uses the add-on's own folder as context — has everything it needs,
+since the repo's own Dockerfile deliberately shares `orchestrator/` from
+the repo root instead) transferred to `/addons/willo-local/` and installed
+via `ha apps install local_willo-local`.
+
+For this specific deployment, two changes from the repo's own
+`haos-addon/config.yaml` default: no `image:` field (Supervisor builds
+natively for the device's real architecture instead of pulling a
+nonexistent registry image), and `homeassistant_config` mapped
+`read_only: true` as extra defense-in-depth on top of the code-level
+checks — both `has_willo_entry()` and `has_meaningful_existing_configuration()`
+only ever read that directory, so read-only access is sufficient for
+everything this device needs and makes a write physically impossible
+regardless of application logic.
+
+**Real, live results**: this device already had a genuine `willo` config
+entry (`source: "user"`, created via the normal config flow, not this
+orchestrator) — so `has_willo_entry()` alone already short-circuited the
+whole boot sequence, confirmed live in the add-on's own logs:
+
+```
+2026-09-16 04:17:03 INFO willo_orchestrator.server: Willo orchestrator serving on http://0.0.0.0:8080 ...
+2026-09-16 04:17:09 INFO willo_orchestrator.hostname: Renamed host to 'willo' via Supervisor (host/options)
+2026-09-16 04:17:09 INFO __main__: A willo config entry already exists in /homeassistant — nothing left to do
+```
+
+This is the first real confirmation, against genuine live Supervisor, of
+two things previously only implemented/unit-tested: `hostname.py`'s
+`host/options` call (the device's real hostname changed to `willo`,
+confirmed via `ha host info`) and `device_model.py`'s `os/info` call
+(`GET /status` from another LAN host returned `"deviceModel": "Green"` —
+real Supervisor data, not the previously-only-verified null-off-Supervisor
+path). `configuration.yaml`'s md5 and mtime were both confirmed identical
+before and after every step of this deployment.
+
+### Port 80, not 8080 — so `http://willo.local` needs no port typed in
+
+Moved the orchestrator's port from 8080 to 80, since a real appliance
+shouldn't need a port typed in. Checked rather than assumed, in order:
+
+1. **Real port-80 conflict check on the actual device**: none of the
+   already-installed add-ons (Matter Server, Music Assistant, the local
+   `marco_web` add-on, Spotify Connect, etc.) publish port 80 or 443 —
+   confirmed via each add-on's own `network:` mapping through `ha apps
+   info`. Also confirmed directly and unambiguously from an external LAN
+   host (this sandbox, the same vantage point a real browser uses):
+   `curl`/a raw TCP connect to `192.168.8.25:80` both got a clean
+   "connection refused" beforehand — genuinely free, not just
+   unconfigured-looking.
+2. **Binding a sub-1024 port from inside a container**: checked the real,
+   currently-published `home-assistant/addons/ssh` add-on (it binds port
+   22) rather than assuming. Its `Dockerfile` has no `USER` directive and
+   its `config.yaml` has no `privileged:` field at all — it binds a
+   privileged port purely by running as root, which is the official base
+   image's default. This add-on's own `Dockerfile` never drops to a
+   non-root user either, so it already had the same implicit capability —
+   no `privileged: [NET_BIND_SERVICE]` grant was needed, matching the
+   real, confirmed convention rather than reaching for a broader or
+   narrower fix than what other add-ons actually do.
+3. **Verified in the sandbox first**: rebuilt the package with `ports:
+   80/tcp: 80` and `WILLO_PORT=80`, ran it, and confirmed for real —
+   not just that it didn't crash — that the process bound port 80
+   (`ss`/`/proc/net/tcp` inside the container showed `0.0.0.0:80 LISTEN
+   .../python3`, running as `root`) and served `/status` correctly
+   through the mapped host port.
+4. **Redeployed to the real device**: stopped the running add-on,
+   replaced `/addons/willo-local/` with the updated package, `ha
+   refresh-updates`, `ha apps rebuild local_willo-local` (rebuilds the
+   image but does not itself restart the app — needed an explicit `ha
+   apps start` afterward), confirmed the live log line
+   `willo_orchestrator.server: Willo orchestrator serving on http://0.0.0.0:80`,
+   confirmed `curl http://192.168.8.25/status` (genuinely no port) returns
+   the correct JSON from an external LAN host, confirmed the old port
+   8080 is gone (`connection refused`), and confirmed `configuration.yaml`'s
+   md5/mtime unchanged through the whole redeploy.
+
+**What is NOT claimed as verified**: `http://willo.local` (mDNS, no port)
+resolving from an actual browser. This sandbox has no mDNS resolver
+configured at all (`curl http://willo.local` fails to resolve here,
+confirmed), so a curl-based check from this Linux sandbox would not be
+meaningful either way — mDNS resolution behavior is genuinely different
+across client stacks (Windows vs. Linux vs. mobile), which is exactly why
+this needs a real check from the user's own browser, not a self-declared
+pass from here. (Notably, the add-on's own access logs already show the
+user's Windows browser successfully browsing `http://willo.local:8080/`
+in the minutes before this port change — real evidence mDNS resolution
+itself already works for them; only the port needed to change.)
+
+**A separate, minor finding worth a future fix, not addressed here**:
+Supervisor's own log flagged that stopping this add-on doesn't handle
+`SIGTERM` gracefully (`willo_orchestrator.main`'s `async_main()` has no
+signal handler, so `asyncio.Event().wait()` just gets killed by the
+default handler) — cosmetic/non-blocking (the process does stop), but
+worth trapping and shutting down cleanly in a future pass.
+
 ### Updated status of the four originally-flagged open items
 
 1. **Onboarding REST payload shapes** — fully verified (see "Onboarding
    REST automation" above).
 2. **Headless config-entry creation mechanism** — fully verified,
    mechanism (b) chosen (see "Headless config-entry creation" above).
-3. **HAOS Supervisor hostname-rename API** — the real API call is now
-   *implemented* (`hostname.py`, `HostClient.set_options`) and its
-   no-Supervisor degradation path is tested, but calling it against a
-   live Supervisor is NOT verified — see above.
-4. **Add-on ↔ Core networking** — partially advanced: the add-on's own
-   container correctly reaches for `http://homeassistant:8123` (the real
-   internal hostname), and the packaged container itself is proven to
-   build and run correctly (Docker verification above), but Supervisor
-   actually wiring that hostname up, and granting the container access to
-   Core's install path for `cleanup.py`'s belt-and-suspenders deletion,
-   remains unverified against a live Supervisor for the same reason as
-   item 3.
+3. **HAOS Supervisor hostname-rename API** — **fully verified against
+   real, live Supervisor** (see "Real Home Assistant Green deployment"
+   above): the actual device's hostname changed to `willo`, confirmed via
+   `ha host info` on the device itself.
+4. **Add-on ↔ Core networking** — the add-on being built and installed
+   **by real Supervisor** (not just `docker run` in isolation) is now
+   verified, `device_model.py`'s `os/info` call returned real data
+   (`"Green"`) against live Supervisor, and the add-on's own network
+   reachability (`http://<device-ip>/status` from another LAN host) is
+   confirmed. Still not verified against live Supervisor: `cleanup.py`'s
+   belt-and-suspenders deletion actually running (this device correctly
+   never needed it, since it was already willo-paired) — that specific
+   sub-case would need a genuinely fresh HAOS Supervisor device to
+   exercise, which real hardware understandably wasn't used for.
 
 No code in this repository or its tests ever attempted to reach real Home
 Assistant Green / HAOS hardware or the user's home network — every test
