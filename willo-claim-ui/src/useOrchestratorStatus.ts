@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export type OrchestratorStage = 'onboarding' | 'syncing' | 'awaiting-pairing' | 'paired'
+export type OrchestratorStage = 'onboarding' | 'syncing' | 'awaiting-pairing' | 'paired' | 'existing-install'
 
 export interface OrchestratorStatus {
   stage: OrchestratorStage

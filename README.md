@@ -73,8 +73,11 @@ a persistent on-device process (`orchestrator/`) that:
 8. writes the `willo` config entry directly into
    `.storage/core.config_entries` and restarts Core
 9. `GET /status` reflects every one of these stages live:
-   `onboarding → syncing → awaiting-pairing → paired` — and separately,
-   as soon as it's known (not gated behind onboarding), a `deviceModel`
+   `onboarding → syncing → awaiting-pairing → paired` (or, on a device
+   that already has real, hand-authored configuration — see "Existing-
+   install safety fix" below — `existing-install` instead, with none of
+   steps 2b-8 above ever running) — and separately, as soon as it's known
+   (not gated behind onboarding), a `deviceModel`
    field ("Green", "Yellow", `null` off-Supervisor) the Willo app's own
    auto-detect screen reads directly, without this orchestrator's own
    claim UI ever displaying it — see `device_model.py` and the open
@@ -733,6 +736,92 @@ were spent on this task — a genuinely different, larger effort than a
 retry, not a quick fix. Per the explicit instruction not to chase this
 indefinitely, stopped here and cleaned up the VM/bridge/TAP/dnsmasq
 infrastructure rather than continuing further.
+
+## Existing-install safety fix — never touch a real, hand-authored configuration.yaml
+
+`ha_config.py`'s `ensure_explicit_configuration()` was unconditional: it
+always overwrote `configuration.yaml` with Willo's own fixed template and
+restarted Core to apply loopback binding. That is only safe on a
+genuinely fresh, never-configured device. It is **catastrophic** on an
+existing install — confirmed against a real user's actual Home Assistant
+Green: an 800+ line `configuration.yaml`, ~15 packages, `shell_command`s
+controlling their home router's VPN, per-room climate/ventilation
+automations, and a custom "Marco" dashboard panel — months of real work
+that an unconditional overwrite would have destroyed.
+
+**The fix is self-detecting, not an opt-in mode.** `main.py`'s boot
+sequence now checks `has_meaningful_existing_configuration()`
+(`ha_config.py`) before ever calling `ensure_explicit_configuration()` or
+restarting Core for it — nothing for a caller to remember to set:
+
+- **Fresh/default content → unchanged behavior.** A missing
+  `configuration.yaml`, HA's own untouched default, or Willo's own
+  already-applied template all proceed exactly as before: the explicit
+  allow-list + loopback binding gets written, Core restarts, onboarding
+  runs to completion, cleanup runs, the claim flow runs.
+- **Real pre-existing content → configuration.yaml is never touched.**
+  The entire onboarding-automation branch (creating a throwaway admin
+  user, the configuration.yaml rewrite, the loopback-binding restart,
+  cleanup deletion, the claim flow, writing a config entry) is skipped
+  outright — onboarding's "user" step would fail anyway on a device
+  that's been onboarded for months, and cleanup's deletion of
+  `analytics`/`cloud` from the shared `homeassistant` package install is
+  not something to ever risk on a device with real, active users. Only
+  what already runs unconditionally, independent of this decision —
+  hostname rename via Supervisor, and serving this status/claim UI — still
+  runs. A new `"existing-install"` status stage (`status.py`,
+  `willo-claim-ui`'s `useOrchestratorStatus.ts`/`App.tsx`) reports this
+  live, with distinct copy ("Importando configuración actual…") instead
+  of a misleading "setting up" message. The orchestrator logs exactly
+  which path was taken and why, every time — never silent.
+
+**What "fresh" actually means was verified empirically, not guessed**:
+running a real, never-before-launched `hass` against an empty config
+directory (HA Core 2026.2.3) and reading back exactly what it wrote —
+11 lines: `default_config:`, a frontend theme include, and
+`automation`/`script`/`scene` `!include` directives. That exact content,
+and Willo's own template once applied, are the two fast-path "definitely
+fresh" cases. Everything else is judged by a small, closed allow-list of
+top-level YAML keys plus the `homeassistant:` block's own sub-keys
+(catching `packages:`, HA's real mechanism for pulling in an entire
+directory of real automations from a single short line, which lives
+nested under `homeassistant:` rather than as its own top-level key) and a
+generous line-count ceiling as a defensive catch-all. Deliberately
+conservative: content this can't even parse, or any single unrecognized
+key, is treated as real — never guessed as "probably fine."
+
+**Verified against real local HA Core instances for both branches** (unit
+tests in `test_ha_config.py` cover the detection function itself,
+including a realistic large fixture with packages/shell_command/inline
+platform config modeled on the real device this was verified against):
+
+- *Fresh path, unchanged behavior*: a brand-new HA Core instance, run
+  through the full boot sequence with this round's code — admin user
+  created, `configuration.yaml` rewritten to Willo's template, Core
+  restarted, onboarding completed, cleanup ran, reached
+  `awaiting-pairing` with a real claim code. Byte-for-byte confirmed the
+  final `configuration.yaml` matches `CONFIGURATION_YAML_CONTENT` exactly.
+- *Existing-install path*: a separate real local HA Core instance seeded
+  with a realistic hand-authored `configuration.yaml` (nested
+  `homeassistant.packages`, `shell_command`, inline `sensor:` platform
+  config — no `willo` config entry, so this exercises the new detection
+  path rather than the already-existing `has_willo_entry` short-circuit).
+  Ran the real orchestrator against it and confirmed: `configuration.yaml`
+  byte-for-byte unchanged (md5 identical before/after), Core's process
+  never restarted, no new admin user created (`\.storage/auth`'s user
+  count unchanged), no `willo` entry written, the orchestrator logged
+  exactly why it stopped, `status.stage` reported `"existing-install"`,
+  and `GET /`/`GET /status` kept serving normally throughout.
+
+**A real, pre-existing sandbox limitation surfaced (and worked around) by
+this verification, not caused by this fix**: a bare-venv Core does not
+always relaunch itself after a `homeassistant.restart` service call —
+sometimes it re-execs in place, but a hung shutdown thread (observed here
+from `default_config`'s Sonos discovery reaching for real UPnP devices on
+this sandbox's LAN) can make it exit for good instead. Real HAOS doesn't
+have this gap (Supervisor always relaunches Core), so this was worked
+around for these tests only with a small shell loop that relaunches
+`hass` whenever it exits — test infrastructure, not a code change.
 
 ### Updated status of the four originally-flagged open items
 

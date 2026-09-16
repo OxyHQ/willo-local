@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-Stage = Literal["onboarding", "syncing", "awaiting-pairing", "paired"]
+Stage = Literal["onboarding", "syncing", "awaiting-pairing", "paired", "existing-install"]
 
 
 @dataclass

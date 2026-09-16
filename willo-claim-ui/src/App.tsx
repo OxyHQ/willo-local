@@ -9,6 +9,12 @@ const STAGE_MESSAGE: Record<OrchestratorStage, string> = {
   syncing: 'Sincronizando…',
   'awaiting-pairing': 'Generando código de emparejamiento…',
   paired: 'Emparejado',
+  // Shown on a device that already had its own real Home Assistant setup
+  // before Willo Local ever touched it — see ha_config.py's
+  // has_meaningful_existing_configuration() and this repo's README.
+  // Deliberately reads as "found and kept your existing setup", not
+  // "wiping and starting fresh".
+  'existing-install': 'Importando configuración actual…',
 }
 
 function App() {

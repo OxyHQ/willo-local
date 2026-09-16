@@ -38,6 +38,19 @@ factory-fresh device has no admin account until that one step completes —
 and it runs there rather than after the whole of onboarding so Core is
 never, even briefly, reachable from the network with onboarding still
 in progress.
+
+Safety fix, checked before ANY of the above runs: steps 2a-6 all assume a
+factory-fresh, never-onboarded device. `has_meaningful_existing_configuration()`
+(ha_config.py) detects a configuration.yaml that already holds real,
+hand-authored configuration — a device that is not fresh at all, verified
+against a real Home Assistant Green with an 800+ line configuration.yaml,
+~15 packages, and months of real automations — and if so, skips the
+entire onboarding-automation branch (creating an admin user, rewriting
+configuration.yaml, restarting Core for loopback binding, cleanup
+deletion, the claim flow, all of it). Only step 1a (hostname rename,
+device model detection) and step 1 (serving this status/claim UI) still
+run, since neither touches configuration.yaml or assumes onboarding is
+incomplete. See status.py's "existing-install" stage.
 """
 
 from __future__ import annotations
@@ -55,7 +68,7 @@ from .const import DEFAULT_CLAIM_STATUS_URL, DEFAULT_CLAIM_URL, DEFAULT_HA_BASE_
 from .device_model import detect_device_model
 from .ha_client import HAClient, HAClientError
 from .hostname import set_device_hostname
-from .ha_config import ensure_explicit_configuration
+from .ha_config import ensure_explicit_configuration, has_meaningful_existing_configuration
 from .ha_entry import has_willo_entry, write_willo_entry
 from .server import run_server
 from .status import new_status
@@ -164,6 +177,30 @@ async def async_main() -> None:
             if has_willo_entry(ha_config_dir):
                 _LOGGER.info("A willo config entry already exists in %s — nothing left to do", ha_config_dir)
                 status.stage = "paired"
+            elif has_meaningful_existing_configuration(ha_config_dir):
+                # Safety fix: this device's configuration.yaml is not a
+                # fresh-install default or Willo's own managed template —
+                # it holds real, hand-authored configuration (verified
+                # against a real Home Assistant Green with an 800+ line
+                # configuration.yaml, ~15 packages, and months of real
+                # automations; see ha_config.py's module doc comment and
+                # this repo's README). The entire onboarding-automation
+                # branch below assumes a factory-fresh device (it creates a
+                # throwaway admin user, rewrites configuration.yaml, and
+                # restarts Core to apply loopback binding) — none of that
+                # is safe here, and onboarding's "user" step would just
+                # fail outright anyway on a device that finished onboarding
+                # months ago. Only what already ran unconditionally above
+                # (hostname rename, serving this status/claim UI) applies;
+                # configuration.yaml is left byte-for-byte untouched.
+                _LOGGER.info(
+                    "%s already holds real, hand-authored configuration (not a fresh-install "
+                    "default or Willo's own managed template) — skipping onboarding automation, "
+                    "the configuration.yaml rewrite, and the loopback-binding restart entirely. "
+                    "Only the hostname rename and this status/claim UI are running.",
+                    ha_config_dir / "configuration.yaml",
+                )
+                status.stage = "existing-install"
             else:
                 tokens = await _complete_user_step(ha, base_url=ha_base_url)
                 access_token = tokens["access_token"]
