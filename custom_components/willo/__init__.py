@@ -46,7 +46,7 @@ import socketio
 from homeassistant.components.camera import async_get_image
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
-from homeassistant.core import Event, HomeAssistant, State
+from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 
@@ -329,15 +329,53 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.exception("Failed to capture a camera snapshot for %s", entity_id)
         await sio.emit("camera_snapshot_result", {"requestId": request_id, "imageBase64": image_base64}, namespace=TUNNEL_NAMESPACE)
 
+    # entity_id -> room, cached and rebuilt only after the entity/device/area
+    # registries change. Building it walks the whole entity registry, and
+    # state_changed fires many times a second on a busy instance (BLE
+    # trackers, power meters), so rebuilding it per event was pure waste.
+    room_index: dict[str, str | None] | None = None
+
+    @callback
+    def _invalidate_room_index(_event: Event) -> None:
+        nonlocal room_index
+        room_index = None
+
+    def _cached_room_index() -> dict[str, str | None]:
+        nonlocal room_index
+        if room_index is None:
+            room_index = _build_room_index(hass)
+        return room_index
+
     async def _on_state_changed(event: Event) -> None:
         new_state: State | None = event.data.get("new_state")
         if new_state is None or _domain_of(new_state.entity_id) not in _SUPPORTED_DOMAINS:
             return
-        device = _to_device(new_state, _build_room_index(hass))
-        if device is not None:
+        # While the tunnel is down (Willo's backend unreachable, or mid-
+        # reconnect) there is nobody to send this to: emitting raised
+        # BadNamespaceError on EVERY state change, flooding HA's log. Nothing
+        # is lost by dropping it — _on_connect sends a full state_snapshot
+        # as soon as the tunnel is back.
+        if TUNNEL_NAMESPACE not in sio.namespaces:
+            return
+        device = _to_device(new_state, _cached_room_index())
+        if device is None:
+            return
+        try:
             await sio.emit("state_changed", device, namespace=TUNNEL_NAMESPACE)
+        except socketio.exceptions.BadNamespaceError:
+            # Disconnected between the check above and this emit — same as above.
+            return
 
-    remove_listener = hass.bus.async_listen(EVENT_STATE_CHANGED, _on_state_changed)
+    unsubscribers = [
+        hass.bus.async_listen(EVENT_STATE_CHANGED, _on_state_changed),
+        hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _invalidate_room_index),
+        hass.bus.async_listen(dr.EVENT_DEVICE_REGISTRY_UPDATED, _invalidate_room_index),
+        hass.bus.async_listen(ar.EVENT_AREA_REGISTRY_UPDATED, _invalidate_room_index),
+    ]
+
+    def remove_listener() -> None:
+        for unsubscribe in unsubscribers:
+            unsubscribe()
 
     try:
         await sio.connect(
