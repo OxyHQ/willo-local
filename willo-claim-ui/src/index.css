@@ -1,31 +1,23 @@
-/* Bloom's canonical design tokens (the Tailwind alias layer — this app has
-   no Tailwind build step, so these `--color-x: var(--x)` declarations are
-   inert here, but importing it is the same precedent
-   packages/frontend/global.css follows for any future consumer that does
-   add Tailwind). The REAL raw values (--primary, --background, --card, ...)
-   come from ./bloom-theme.css below — see that file's own doc comment and
-   scripts/generate-bloom-theme.ts for why a static file, not this import,
-   is what actually supplies them. */
+/* Bloom's documented setup for a Tailwind v4 web app (see
+   node_modules/@oxy.so/bloom/docs/design-tokens.mdx). The colour values
+   themselves (--background, --primary, ...) are written at runtime by
+   BloomProvider from Willo's seed — see main.tsx. */
+@import "tailwindcss";
 @import "@oxy.so/bloom/design-tokens/theme.css";
-@import "./bloom-theme.css";
 
-:root {
-  color-scheme: light dark;
-  font-family: var(--bloom-font-sans, system-ui, "Segoe UI", Roboto, sans-serif);
-}
+/* Bloom's components emit their layout as utility classes; Tailwind only
+   scans this app's own sources by default, so point it at Bloom's built lib
+   (docs/typography.mdx, docs/dropdown-menu.mdx). */
+@source "../node_modules/@oxy.so/bloom/lib/**/*.{js,jsx}";
 
-* {
-  box-sizing: border-box;
-}
-
+/* The one thing Bloom doesn't do for a page mounted with createRoot (rather
+   than react-native-web's AppRegistry): let the root View fill the viewport. */
 html,
-body,
-#root {
+body {
   height: 100%;
-  margin: 0;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
+#root {
+  display: flex;
+  min-height: 100%;
 }

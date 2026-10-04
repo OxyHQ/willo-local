@@ -12,6 +12,13 @@ Standalone Vite + React + TypeScript project — own `package.json`, not
 part of the Willo monorepo's workspaces (no reason to share tooling with
 an Expo app for a static status screen).
 
+UI is [Bloom](https://www.npmjs.com/package/@oxy.so/bloom) used directly, the
+way Bloom documents for a Vite web app: react-native-web via
+`vite-plugin-react-native-web`, Tailwind v4 importing Bloom's `theme.css` and
+`@source`-scanning its `lib/`, and `BloomProvider` configured with Willo's seed
+colours in `src/main.tsx`. Colours are resolved by Bloom at runtime — there is
+no app-side theme file.
+
 ## Develop
 
 ```
