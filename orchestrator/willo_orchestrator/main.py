@@ -10,7 +10,7 @@ sequence from OxyHQ/Willo issue #9:
     2b. write configuration.yaml's explicit allow-list + loopback       (ha_config.py)
         http binding; restart Core if that file changed, then resume
     3. drive the rest of HA onboarding via REST                        (ha_client.py)
-    4. delete analytics/cloud, replace frontend with an inert stub      (cleanup.py)
+    4. replace frontend with an inert stub                             (cleanup.py)
        (belt-and-suspenders — loopback binding in step 2b is the
        load-bearing reachability mechanism; the stub swap is
        defense-in-depth layered on top, not a substitute for it)
@@ -226,7 +226,6 @@ async def async_main() -> None:
 
                 status.stage = "syncing"
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, cleanup.delete_stock_components)
                 # Defense-in-depth on top of ha_config.py's loopback binding
                 # (the load-bearing mechanism) — see cleanup.py and
                 # frontend_stub.py for why this is a separate, independently
