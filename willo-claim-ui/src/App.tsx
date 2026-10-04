@@ -1,5 +1,12 @@
+import { Admonition } from '@oxy.so/bloom/admonition'
+import { AnimatedCheck, type AnimatedCheckRef } from '@oxy.so/bloom/animated-check'
+import { Card } from '@oxy.so/bloom/card'
+import { fontFamilies } from '@oxy.so/bloom/fonts'
+import { atoms as a } from '@oxy.so/bloom/styles'
+import { H1, Lead, Muted, Text } from '@oxy.so/bloom/typography'
 import { QRCodeSVG } from 'qrcode.react'
-import './App.css'
+import { useEffect, useRef } from 'react'
+import { View } from 'react-native'
 import { connectHomeAssistantAnimation } from './lottie/connect-home-assistant-animation'
 import { ThemedLottie } from './lottie/ThemedLottie'
 import { useOrchestratorStatus, type OrchestratorStage } from './useOrchestratorStatus'
@@ -17,41 +24,59 @@ const STAGE_MESSAGE: Record<OrchestratorStage, string> = {
   'existing-install': 'Importando configuración actual…',
 }
 
+function ClaimCard({ claimCode }: { claimCode: string }) {
+  return (
+    <Card radius="radius-20">
+      <View style={[a.align_center, a.gap_md, a.p_xl]}>
+        {/* marginSize draws the QR's white quiet zone inside the SVG, so the
+            code stays scannable on a dark card too. */}
+        <QRCodeSVG value={claimCode} size={220} marginSize={4} />
+        <Text variant="title-1-semibold" style={{ fontFamily: fontFamilies.mono }}>
+          {claimCode}
+        </Text>
+        <Muted style={[a.text_center, { maxWidth: 416 }]}>
+          Abre la app de Willo y escanea el código, o escríbelo a mano.
+        </Muted>
+      </View>
+    </Card>
+  )
+}
+
+/** Mounted on the transition to `paired`, which is the moment the check should draw. */
+function PairedCheck() {
+  const check = useRef<AnimatedCheckRef>(null)
+  useEffect(() => {
+    check.current?.play()
+  }, [])
+  return <AnimatedCheck ref={check} size={64} />
+}
+
 function App() {
   const status = useOrchestratorStatus()
 
   return (
-    <main className="screen">
+    <View style={[a.flex_1, a.align_center, a.justify_center, a.gap_xl, a.p_xl]}>
       {/* The same "waiting to connect Home Assistant" animation the main
           Willo app plays at this exact moment in its own onboarding — see
           src/lottie/connect-home-assistant-animation.ts — for visual
-          continuity between the app side and the device side of one flow.
-          Replaces the earlier text-only wordmark placeholder. */}
-      <ThemedLottie animation={connectHomeAssistantAnimation} className="logo" />
-      <h1 className="wordmark">Willo</h1>
+          continuity between the app side and the device side of one flow. */}
+      <ThemedLottie animation={connectHomeAssistantAnimation} />
+      <H1>Willo</H1>
 
       {status.error !== null ? (
-        <p className="statusLine statusLine--error">
-          Algo salió mal. Vuelve a intentarlo o contacta con soporte de Willo.
-        </p>
+        <Admonition type="error">Algo salió mal. Vuelve a intentarlo o contacta con soporte de Willo.</Admonition>
       ) : (
         <>
-          <p className="statusLine">{STAGE_MESSAGE[status.stage]}</p>
+          <Lead style={a.text_center}>{STAGE_MESSAGE[status.stage]}</Lead>
 
           {status.stage === 'awaiting-pairing' && status.claimCode !== null && (
-            <div className="claimCard">
-              <div className="qrWrapper">
-                <QRCodeSVG value={status.claimCode} size={220} />
-              </div>
-              <p className="claimCode">{status.claimCode}</p>
-              <p className="claimHint">Abre la app de Willo y escanea el código, o escríbelo a mano.</p>
-            </div>
+            <ClaimCard claimCode={status.claimCode} />
           )}
 
-          {status.stage === 'paired' && <p className="pairedCheck">✓</p>}
+          {status.stage === 'paired' && <PairedCheck />}
         </>
       )}
-    </main>
+    </View>
   )
 }
 

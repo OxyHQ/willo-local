@@ -3,58 +3,20 @@
 // monorepo — the exact animation the main app's own onboarding plays at
 // this same moment (waiting to connect Home Assistant), for visual
 // continuity between the app side and the device side of the same flow.
-import { cropLottie } from "./lottie-crop";
+import type { ThemeColors } from "@oxy.so/bloom/theme";
 import rawAnimation from "./connect-home-assistant.json";
+import { cropLottie } from "./lottie-crop";
 import type { LottieAnimation } from "./lottie-types";
 
 /**
- * The Bloom `ThemeColors` role names the original animation's colorRoles
- * mapping uses (packages/frontend/data/lottie-animations.ts). Kept as the
- * same vocabulary as the source mapping, resolved to a CSS custom property
- * below (this app has no `useTheme()` — no React Native runtime here — so
- * it reads Bloom's live theme values from the DOM instead; see
- * ThemedLottie.tsx).
+ * The Bloom `ThemeColors` roles the original animation's colorRoles mapping
+ * uses (packages/frontend/data/lottie-animations.ts) — read at render time
+ * from `useTheme().colors`, exactly as the main app does (see ThemedLottie.tsx).
  */
-export type ThemeColorRole =
-  | "backgroundSecondary"
-  | "border"
-  | "textSecondary"
-  | "textTertiary"
-  | "primary"
-  | "secondary"
-  | "success"
-  | "error";
-
-/**
- * Role → CSS custom property, matching @oxy.so/bloom's own
- * `buildColorsFromPreset` (src/theme/build-theme.ts) field-for-field:
- *   backgroundSecondary: g('surface')            → --surface
- *   border:              g('border')             → --border
- *   textSecondary:       g('muted-foreground')    → --muted-foreground
- *   primary/secondary/success/error: g(<same name>)
- *
- * ONE deliberate approximation: Bloom's real `textTertiary` is
- * `r.outline` — the M3 colour engine's "outline" role, which is NOT one of
- * the canonical tokens `theme.css`/scripts/generate-bloom-theme.ts expose as
- * a static CSS variable (it only exists inside the JS colour engine, which
- * isn't safely importable here without pulling in `react-native` — see
- * parse-rgb.ts's doc comment for why). `--muted-foreground` is the closest
- * available real Bloom token doing the same "muted secondary/tertiary text"
- * job, so `textTertiary` maps to it too. Both source hex values the
- * original animation maps to `textTertiary` therefore render identically to
- * `textSecondary` here — a real, documented divergence from the app's exact
- * pixels, not an oversight.
- */
-export const THEME_COLOR_ROLE_TO_CSS_VAR: Readonly<Record<ThemeColorRole, string>> = {
-  backgroundSecondary: "--surface",
-  border: "--border",
-  textSecondary: "--muted-foreground",
-  textTertiary: "--muted-foreground",
-  primary: "--primary",
-  secondary: "--secondary",
-  success: "--success",
-  error: "--error",
-};
+export type ThemeColorRole = keyof Pick<
+  ThemeColors,
+  "backgroundSecondary" | "border" | "textSecondary" | "textTertiary" | "primary" | "secondary" | "success" | "error"
+>;
 
 export interface ThemedAnimation {
   source: LottieAnimation;
