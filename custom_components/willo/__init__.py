@@ -31,15 +31,24 @@ WHAT THIS RECEIVES: `call_service` (fire-and-forget, matching how Willo's
 own UI has always issued commands — no request/response round trip) and
 `request_camera_snapshot` (the one exception: a real request/response, since
 a camera card is asking a direct question).
+
+WHAT THIS NEVER DOES: modify the Home Assistant installation it runs in.
+It is installed on people's own Home Assistant instances, not only on Willo
+Local devices, so it must not delete or replace stock components. Earlier
+versions deleted `analytics`/`cloud` and swapped `frontend` for a stub on
+every boot; on a normal install that breaks `default_config` (it hard-depends
+on `cloud`) and leaves the owner without a UI. Neither was needed. `cloud` is
+only loaded when the configuration asks for it, and Willo Local's explicit
+allow-list never does. `analytics` sends nothing unless its preferences are
+turned on. What keeps Core unreachable from the network on Willo Local is
+loopback binding (`http.server_host: 127.0.0.1`), which the orchestrator
+writes.
 """
 
 from __future__ import annotations
 
 import base64
-import importlib.util
 import logging
-import shutil
-from pathlib import Path
 from typing import Any
 
 import socketio
@@ -51,136 +60,8 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 
 from .const import CONF_HOME_ID, CONF_SECRET, DEFAULT_TUNNEL_URL, DOMAIN, TUNNEL_NAMESPACE
-from .frontend_stub import STUB_INIT_PY, STUB_MANIFEST_JSON
 
 _LOGGER = logging.getLogger(__name__)
-
-# Willo Local (see OxyHQ/Willo issue #9): the device itself must never show
-# Home Assistant's own UI or branding. Rather than fork Core or ship a
-# patched OS image, this integration physically deletes these stock
-# components from the installed `homeassistant` package on every boot —
-# self-healing against a Core update that restores them. Tested against a
-# real `homeassistant` pip install to confirm nothing else in stock Core
-# imports from `analytics`/`cloud` at import time in a way that would break
-# (see this repo's README for the exact command and findings); if a future
-# HA version changes that, `_delete_stock_components` below still can't
-# crash setup — it only ever logs and moves on.
-#
-# `frontend` is DELIBERATELY EXCLUDED from this list — do not add it back.
-# Deleting `frontend` was tried and reverted after real testing: HA's own
-# `homeassistant/bootstrap.py` unconditionally imports `homeassistant.
-# components.config` at module level (a performance pre-import, nothing to
-# do with configuration.yaml), and `config/__init__.py` imports `frontend`
-# at ITS top level — so once `frontend`'s files are gone, the very next
-# `hass` process launch crashes outright with `ImportError: cannot import
-# name 'frontend' from 'homeassistant.components'`, before Core's own
-# recovery-mode logic can even run. This was proven twice: manually, and
-# through a full onboarding→cleanup→claim→pair→restart run whose next
-# `hass` launch crashed with that exact traceback (see this repo's README,
-# "Cleanup deletion" section). Excluding `frontend` from
-# `configuration.yaml` does NOT avoid this either and does not even stop
-# `frontend` from running — HA's `bootstrap._get_domains()` unconditionally
-# merges `DEFAULT_INTEGRATIONS` (which includes `"frontend"`) into every
-# non-recovery-mode boot regardless of `configuration.yaml`'s content, and
-# recovery mode force-includes `frontend` too — confirmed by booting HA
-# with `frontend:` absent from an explicit `configuration.yaml` and
-# getting a real `302 → /onboarding.html` serving HA's actual onboarding
-# wizard HTML anyway. See the README for the full writeup and the
-# network-level mitigation (binding Core's own `http:` to loopback only)
-# that was verified to actually achieve "unreachable from outside this
-# device" instead — not yet wired into this integration pending a design
-# decision, since it changes configuration.yaml, not this file.
-_STOCK_COMPONENTS_TO_REMOVE = ("analytics", "cloud")
-
-
-def _delete_stock_components() -> None:
-    """Delete analytics/ and cloud/ from the installed homeassistant
-    package so this device never phones home to Nabu Casa's cloud
-    services or Home Assistant's own analytics collection — even after a
-    Core update restores them, since this runs on every boot. (`frontend`
-    is NOT deleted here — see the module-level comment on
-    `_STOCK_COMPONENTS_TO_REMOVE` above for why, and this repo's README
-    for the underlying finding.)
-
-    The install path is resolved via `importlib`, never hardcoded, so this
-    survives HA version bumps that change the install layout (venv vs.
-    system site-packages vs. HAOS's container layout).
-
-    This function must NEVER raise. A missing directory (already deleted,
-    or a future HA release renaming/removing the component), a permission
-    error, or any other failure is logged as a warning and skipped — this
-    is defense-in-depth, not a precondition for the tunnel itself working,
-    and must never block integration setup.
-    """
-    spec = importlib.util.find_spec("homeassistant")
-    if spec is None or not spec.submodule_search_locations:
-        _LOGGER.warning(
-            "Could not resolve the installed homeassistant package via importlib; "
-            "skipping analytics/cloud cleanup this boot"
-        )
-        return
-
-    for install_root in spec.submodule_search_locations:
-        components_dir = Path(install_root) / "components"
-        for component_name in _STOCK_COMPONENTS_TO_REMOVE:
-            component_dir = components_dir / component_name
-            try:
-                if component_dir.is_dir():
-                    shutil.rmtree(component_dir)
-                    _LOGGER.info("Willo: deleted stock '%s' component at %s", component_name, component_dir)
-            except OSError:
-                _LOGGER.warning(
-                    "Willo: failed to delete stock '%s' component at %s — leaving it in place",
-                    component_name,
-                    component_dir,
-                    exc_info=True,
-                )
-
-
-def _replace_frontend_with_stub() -> None:
-    """Replace the installed `frontend` component's files with an inert
-    stub (see frontend_stub.py for the full rationale and the fragility
-    caveat) — defense-in-depth on TOP of loopback binding (see
-    orchestrator/willo_orchestrator/ha_config.py), never a substitute for
-    it. Runs alongside _delete_stock_components, as a SEPARATE step with
-    its own try/except: a failure here must never affect the analytics/
-    cloud deletion above, or vice versa, and must never block integration
-    setup.
-
-    Unlike _delete_stock_components, this does not simply remove
-    `frontend` — that crashes the next `hass` launch (see this module's
-    comment above _STOCK_COMPONENTS_TO_REMOVE). It replaces the directory
-    contents with two files that keep the SAME importable module path and
-    the same symbols other stock code needs, so nothing that imports
-    `frontend` fails — those imports just get inert no-ops instead of a
-    real, HTTP-serving component.
-    """
-    spec = importlib.util.find_spec("homeassistant")
-    if spec is None or not spec.submodule_search_locations:
-        _LOGGER.warning(
-            "Could not resolve the installed homeassistant package via importlib; "
-            "skipping the frontend stub swap this boot"
-        )
-        return
-
-    for install_root in spec.submodule_search_locations:
-        frontend_dir = Path(install_root) / "components" / "frontend"
-        try:
-            if frontend_dir.is_dir():
-                shutil.rmtree(frontend_dir)
-            frontend_dir.mkdir(parents=True, exist_ok=True)
-            (frontend_dir / "__init__.py").write_text(STUB_INIT_PY)
-            (frontend_dir / "manifest.json").write_text(STUB_MANIFEST_JSON)
-            _LOGGER.info("Willo: replaced the 'frontend' component with an inert stub at %s", frontend_dir)
-        except OSError:
-            _LOGGER.warning(
-                "Willo: failed to replace the 'frontend' component with a stub at %s — "
-                "leaving the real component in place (loopback binding is still the load-bearing "
-                "protection either way)",
-                frontend_dir,
-                exc_info=True,
-            )
-
 
 # The domains Willo's UI knows how to render. An entity in any other domain
 # (automations, scripts, switches, climate, …) is dropped, not sent with
@@ -283,13 +164,6 @@ def _snapshot_devices(hass: HomeAssistant) -> list[dict[str, Any]]:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # Both run unconditionally, before anything else, on every single boot
-    # — see _delete_stock_components' and _replace_frontend_with_stub's
-    # own doc comments above. Two separate calls, deliberately: a failure
-    # in one must never affect the other.
-    await hass.async_add_executor_job(_delete_stock_components)
-    await hass.async_add_executor_job(_replace_frontend_with_stub)
-
     home_id: str = entry.data[CONF_HOME_ID]
     secret: str = entry.data[CONF_SECRET]
     tunnel_url: str = entry.options.get("tunnel_url", DEFAULT_TUNNEL_URL)

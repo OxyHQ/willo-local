@@ -64,9 +64,10 @@ a persistent on-device process (`orchestrator/`) that:
    if it changed — restarts Core and resumes once it's back up
 5. drives the rest of HA's onboarding REST API (core_config/analytics/
    integration steps)
-6. deletes `analytics`/`cloud` from the installed `homeassistant` package
-   (belt-and-suspenders — `frontend` is deliberately NOT deleted; see
-   "Cleanup deletion" below for why)
+6. replaces the installed `frontend` component with an inert stub
+   (defense-in-depth on top of the loopback binding; see "Inert frontend
+   stub" below). It no longer deletes `analytics`/`cloud`; see the update
+   note at the top of "Cleanup deletion".
 7. calls the real Willo backend's `POST /tunnel/claim` /
    `GET /tunnel/claim/status`, falling back to a clearly-logged local mock
    if that backend isn't reachable
@@ -108,7 +109,21 @@ the two open items at the very end of this section.
 
 **Cleanup deletion — `frontend` is intentionally never deleted, and
 `configuration.yaml` alone cannot hide it either. Read this before
-touching either copy of `_delete_stock_components`.**
+touching `orchestrator/willo_orchestrator/cleanup.py`.**
+
+> **Update (2026-10): the `analytics`/`cloud` deletion is gone, from both the
+> integration and the orchestrator.** Checked against HA 2026.9.4's
+> `bootstrap.py`, Core only sets `cloud` up when the configuration or a
+> dependency asks for it (`STAGE_1_INTEGRATIONS & all_domains`). Willo
+> Local's explicit allow-list never asks for it, so it never loads.
+> `analytics` is in `DEFAULT_INTEGRATIONS`, so it always loads, but with the
+> empty preferences the onboarding analytics step leaves, it sends nothing.
+> So the deletion bought nothing, and on a normal install it is destructive:
+> `default_config` hard-depends on `cloud`, which takes history, logbook,
+> energy, bluetooth and stream down with it. The `willo` integration now
+> never modifies the Home Assistant installation it runs in, because it also
+> runs on people's own instances. `tests/test_setup_leaves_ha_alone.py`
+> guards that. The history below is kept for context.
 
 This went through three real, tested iterations, in this order:
 
@@ -190,14 +205,12 @@ only pulled in if explicitly configured, or (on real Supervisor) as a
 dependency of `hassio` — checked, `hassio`'s manifest only depends on
 `http`/`repairs`, not `cloud`.
 
-**Net, current state**: `custom_components/willo/__init__.py` and
-`orchestrator/willo_orchestrator/cleanup.py` both delete `analytics` and
-`cloud` only — `frontend` is excluded from
-`_STOCK_COMPONENTS_TO_REMOVE`/`STOCK_COMPONENTS_TO_REMOVE` in both files,
-permanently, with the finding above in a comment directly above that
-constant so it doesn't get silently reintroduced. Every failure is still
-caught and logged, never raised. Reachability is handled separately, at
-the network level — see below.
+**Net, current state (2026-10)**: nothing deletes `analytics`, `cloud`
+or `frontend` any more (see the update note at the top of this section).
+The `willo` integration never touches the Home Assistant install. Only
+the orchestrator, on a fresh Willo Local device, swaps `frontend` for an
+inert stub; every failure there is caught and logged, never raised.
+Reachability is handled separately, at the network level — see below.
 
 ### Loopback binding — the implemented, verified mechanism for "no HA UI ever reachable from outside this device"
 
@@ -269,10 +282,10 @@ restart path reachable from a less-controlled starting state.
 Loopback binding alone satisfies "no HA UI ever reachable from outside
 this device" — that's the load-bearing guarantee. But the user wanted the
 actual footprint gone where practical, not merely hidden behind a network
-restriction, so `custom_components/willo/frontend_stub.py` and
-`orchestrator/willo_orchestrator/frontend_stub.py` (identical content,
-duplicated the same way the rest of this cleanup logic is — see those
-files) replace the installed `frontend` component's files with an inert
+restriction, so `orchestrator/willo_orchestrator/frontend_stub.py` (until
+2026-10 also duplicated in `custom_components/willo/`; the integration no
+longer touches the HA install, see the update note under "Cleanup
+deletion") replaces the installed `frontend` component's files with an inert
 stub: same importable module path, same symbols other stock code needs,
 but `async_setup`, `async_register_built_in_panel`, `async_remove_panel`,
 and `async_system_store` all do nothing real — no HTTP views, no static

@@ -25,42 +25,11 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 @pytest.fixture(autouse=True)
 def _prevent_real_side_effects_from_async_setup_entry():
     """Any test that drives a Willo config flow to CREATE_ENTRY (both
-    async_step_user and async_step_claim can) causes the config entries
-    manager to immediately call async_setup_entry for real. That function
-    does three things no test should ever do for real:
-
-    1. _delete_stock_components() — deletes analytics/cloud (NOT frontend
-       — see __init__.py's module-level comment on
-       _STOCK_COMPONENTS_TO_REMOVE for why frontend deletion was tried and
-       reverted) from the ACTUAL installed homeassistant package running
-       this very test suite. This is not hypothetical: an earlier version
-       of this test suite did not have this fixture, and running it once
-       deleted real directories from the pytest-homeassistant-custom-component
-       venv (at the time, this function still included frontend, which
-       broke every subsequent test run's collection — bootstrap.py itself
-       hard-imports `config`, which hard-imports `frontend`; see this
-       repo's README, "Cleanup deletion" section, for the full finding
-       that led to frontend being dropped from this function entirely).
-       _delete_stock_components has its own dedicated, isolated tests in
-       test_init.py that verify it safely, against a fake tmp_path package
-       tree — it must never run un-mocked here, since even analytics/cloud
-       alone are real files in this venv's own HA install that a test run
-       has no business deleting as a side effect.
-    2. _replace_frontend_with_stub() — same story as above, but would
-       overwrite the real frontend/__init__.py and manifest.json in this
-       venv's own HA install with the stub instead of deleting them. Has
-       its own dedicated, isolated tests in test_frontend_stub.py.
-    3. sio.connect(...) — a real outbound socketio connection attempt to
-       api.willo.sh, which is slow, flaky in a sandboxed test environment,
-       and irrelevant to what config_flow/init tests are checking.
-
-    Autouse + module-wide (not just one test) because it is easy to add a
-    new test that reaches CREATE_ENTRY and forget this — the cost of
-    forgetting is silently corrupting the test venv's own HA install.
+    async_step_user and async_step_claim can) makes the config entries
+    manager call async_setup_entry for real, which opens a real outbound
+    socket.io connection to api.willo.sh. That is slow, flaky in a sandbox
+    and irrelevant to what these tests check, so connect is mocked for
+    every test.
     """
-    with (
-        patch("custom_components.willo._delete_stock_components"),
-        patch("custom_components.willo._replace_frontend_with_stub"),
-        patch("custom_components.willo.socketio.AsyncClient.connect", new=AsyncMock()),
-    ):
+    with patch("custom_components.willo.socketio.AsyncClient.connect", new=AsyncMock()):
         yield
