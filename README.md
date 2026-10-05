@@ -109,7 +109,7 @@ the two open items at the very end of this section.
 
 **Cleanup deletion — `frontend` is intentionally never deleted, and
 `configuration.yaml` alone cannot hide it either. Read this before
-touching either copy of `_delete_stock_components`.**
+touching `orchestrator/willo_orchestrator/cleanup.py`.**
 
 > **Update (2026-10): the `analytics`/`cloud` deletion is gone, from both the
 > integration and the orchestrator.** Checked against HA 2026.9.4's
@@ -205,14 +205,12 @@ only pulled in if explicitly configured, or (on real Supervisor) as a
 dependency of `hassio` — checked, `hassio`'s manifest only depends on
 `http`/`repairs`, not `cloud`.
 
-**Net, current state**: `custom_components/willo/__init__.py` and
-`orchestrator/willo_orchestrator/cleanup.py` both delete `analytics` and
-`cloud` only — `frontend` is excluded from
-`_STOCK_COMPONENTS_TO_REMOVE`/`STOCK_COMPONENTS_TO_REMOVE` in both files,
-permanently, with the finding above in a comment directly above that
-constant so it doesn't get silently reintroduced. Every failure is still
-caught and logged, never raised. Reachability is handled separately, at
-the network level — see below.
+**Net, current state (2026-10)**: nothing deletes `analytics`, `cloud`
+or `frontend` any more (see the update note at the top of this section).
+The `willo` integration never touches the Home Assistant install. Only
+the orchestrator, on a fresh Willo Local device, swaps `frontend` for an
+inert stub; every failure there is caught and logged, never raised.
+Reachability is handled separately, at the network level — see below.
 
 ### Loopback binding — the implemented, verified mechanism for "no HA UI ever reachable from outside this device"
 

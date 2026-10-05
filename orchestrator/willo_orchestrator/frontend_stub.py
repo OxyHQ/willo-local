@@ -1,10 +1,8 @@
 """The inert stub that replaces the real `frontend` component's files —
 see `replace_frontend_with_stub` in `cleanup.py` for how and when this
-gets written (this is the orchestrator's own copy of the SAME logic in
-custom_components/willo/frontend_stub.py — see cleanup.py's own module
-doc comment for why this logic is duplicated across the two packages
-rather than shared), and this repo's README, "Cleanup deletion" section,
-for the full investigation this came out of.
+gets written (only on a fresh Willo Local device; the `willo` integration
+never modifies the Home Assistant install), and this repo's README,
+"Cleanup deletion" section, for the full investigation this came out of.
 
 WHY A STUB INSTEAD OF DELETING `frontend`: physically deleting it crashes
 the next `hass` launch outright (`homeassistant/bootstrap.py` hard-imports
@@ -27,9 +25,7 @@ ENTIRE installed `homeassistant==2026.2.3` package — see the README for
 the exact commands — and is only as correct as that snapshot. A future HA
 version could add a new stock component that imports a new symbol from
 `frontend`; the most likely failure mode is that ONE component's setup
-logging a soft "Setup failed for X" error (the same category of
-degradation already accepted for the analytics/cloud deletion below) —
-not a repeat of the frontend-deletion crash, since bootstrap.py's own
+logging a soft "Setup failed for X" error — not a repeat of the frontend-deletion crash, since bootstrap.py's own
 hard-imported chain only needs `frontend` to exist and expose what
 `config/__init__.py` touches, which this stub still does. Still, re-run
 this file's derivation grep before bumping the target HA version — see
@@ -41,7 +37,7 @@ relies on a real, documented HA config option, not a reverse-engineered
 internal contract, so it must never be removed even with this stub in
 place. This stub is defense-in-depth layered on top of it, not a
 replacement for it — verified to remain safe to lose (see
-_replace_frontend_with_stub's try/except): if writing or swapping in the
+replace_frontend_with_stub's try/except): if writing or swapping in the
 stub fails for any reason, this function logs a warning and leaves the
 real `frontend` in place, exactly as if this stub didn't exist at all.
 """
@@ -76,8 +72,8 @@ STUB_MANIFEST_JSON = """\
 
 STUB_INIT_PY = '''\
 """STUB replacement for homeassistant.components.frontend, written by
-Willo Local (OxyHQ/Willo issue #9) — see custom_components/willo/
-frontend_stub.py for the full explanation. Registers nothing: no HTTP
+Willo Local (OxyHQ/Willo issue #9) — see orchestrator/willo_orchestrator/
+frontend_stub.py in OxyHQ/willo-local for the full explanation. Registers nothing: no HTTP
 views, no static assets, no websocket commands, no onboarding.html, no
 dashboard.
 """
