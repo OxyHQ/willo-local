@@ -4,7 +4,7 @@
 // `AnimationObject` type, swapped for a local equivalent (see
 // lottie-types.ts) since this app renders with lottie-web, not
 // lottie-react-native.
-import type { LottieAnimation } from "./lottie-types";
+import type { LottieAnimation } from './lottie-types';
 
 /** A rectangle in the animation's own canvas coordinates. */
 export interface LottieCropBox {
@@ -14,7 +14,7 @@ export interface LottieCropBox {
   height: number;
 }
 
-const CROPPED_COMPOSITION_ID = "cropped-composition";
+const CROPPED_COMPOSITION_ID = 'cropped-composition';
 
 /**
  * Shrinks an animation's canvas to `box`, so the drawing fills whatever the

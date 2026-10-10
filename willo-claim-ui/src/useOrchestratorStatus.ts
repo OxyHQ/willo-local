@@ -1,20 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react';
 
-export type OrchestratorStage = 'onboarding' | 'syncing' | 'awaiting-pairing' | 'paired' | 'existing-install'
+export type OrchestratorStage =
+  | 'onboarding'
+  | 'syncing'
+  | 'awaiting-pairing'
+  | 'paired'
+  | 'existing-install';
 
 export interface OrchestratorStatus {
-  stage: OrchestratorStage
-  claimCode: string | null
-  qrDataUrl: string | null
+  stage: OrchestratorStage;
+  claimCode: string | null;
+  qrDataUrl: string | null;
   // The detected HA board model ("Green", "Yellow", ...) — this screen
   // doesn't display it (the Willo app's own "Connect Home Assistant"
   // auto-detect screen is the consumer that cares), but the field is
   // real and part of the same /status contract, so it's typed here too.
-  deviceModel: string | null
-  error: string | null
+  deviceModel: string | null;
+  error: string | null;
 }
 
-const POLL_INTERVAL_MS = 1000
+const POLL_INTERVAL_MS = 1000;
 
 const INITIAL_STATUS: OrchestratorStatus = {
   stage: 'onboarding',
@@ -22,7 +27,7 @@ const INITIAL_STATUS: OrchestratorStatus = {
   qrDataUrl: null,
   deviceModel: null,
   error: null,
-}
+};
 
 /**
  * Polls the orchestrator's own local GET /status endpoint (served by the
@@ -37,20 +42,20 @@ const INITIAL_STATUS: OrchestratorStatus = {
  * data.
  */
 export function useOrchestratorStatus(): OrchestratorStatus {
-  const [status, setStatus] = useState<OrchestratorStatus>(INITIAL_STATUS)
+  const [status, setStatus] = useState<OrchestratorStatus>(INITIAL_STATUS);
 
   useEffect(() => {
-    let ignore = false
+    let ignore = false;
 
     async function poll(): Promise<void> {
       try {
-        const response = await fetch('/status')
+        const response = await fetch('/status');
         if (!response.ok) {
-          return
+          return;
         }
-        const data = (await response.json()) as OrchestratorStatus
+        const data = (await response.json()) as OrchestratorStatus;
         if (!ignore) {
-          setStatus(data)
+          setStatus(data);
         }
       } catch {
         // A transient fetch failure (e.g. the orchestrator restarting
@@ -60,14 +65,14 @@ export function useOrchestratorStatus(): OrchestratorStatus {
       }
     }
 
-    poll()
-    const intervalId = window.setInterval(poll, POLL_INTERVAL_MS)
+    poll();
+    const intervalId = window.setInterval(poll, POLL_INTERVAL_MS);
 
     return () => {
-      ignore = true
-      window.clearInterval(intervalId)
-    }
-  }, [])
+      ignore = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
-  return status
+  return status;
 }

@@ -36,3 +36,17 @@ Produces `dist/`, which `orchestrator/willo_orchestrator/server.py` serves
 directly (see `WILLO_STATIC_DIR` in that package's README section) — build
 this before running the orchestrator, or `/status` will still work but
 every other path will 404.
+
+## Lint and format
+
+[Biome](https://biomejs.dev) formats and lints this project (config in
+`biome.json`; CI runs `bunx biome ci .` from this directory via
+`.github/workflows/lint.yml`). Biome is scoped to `willo-claim-ui/` only —
+the Python side of the repo and the JSON Home Assistant reads
+(`manifest.json`, `translations/`, `hacs.json`) are outside it.
+
+```
+bun run lint       # biome check .
+bun run lint:fix   # biome check --write .
+bun run format     # biome format --write .
+```

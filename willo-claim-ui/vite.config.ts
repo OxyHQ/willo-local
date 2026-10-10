@@ -1,7 +1,7 @@
-import tailwindcss from '@tailwindcss/vite'
-import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
-import reactNativeWeb from 'vite-plugin-react-native-web'
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+import reactNativeWeb from 'vite-plugin-react-native-web';
 
 // Bloom is a React Native component library that runs on the web through
 // react-native-web. This is the same setup the Oxy Vite apps use
@@ -18,4 +18,4 @@ export default defineConfig(({ mode }) => ({
     __DEV__: JSON.stringify(mode !== 'production'),
     'process.env.NODE_ENV': JSON.stringify(mode),
   },
-}))
+}));
