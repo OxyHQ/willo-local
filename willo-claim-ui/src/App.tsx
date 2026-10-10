@@ -1,15 +1,15 @@
-import { Admonition } from '@oxy.so/bloom/admonition'
-import { AnimatedCheck, type AnimatedCheckRef } from '@oxy.so/bloom/animated-check'
-import { Card } from '@oxy.so/bloom/card'
-import { fontFamilies } from '@oxy.so/bloom/fonts'
-import { atoms as a } from '@oxy.so/bloom/styles'
-import { H1, Lead, Muted, Text } from '@oxy.so/bloom/typography'
-import { QRCodeSVG } from 'qrcode.react'
-import { useEffect, useRef } from 'react'
-import { View } from 'react-native'
-import { connectHomeAssistantAnimation } from './lottie/connect-home-assistant-animation'
-import { ThemedLottie } from './lottie/ThemedLottie'
-import { useOrchestratorStatus, type OrchestratorStage } from './useOrchestratorStatus'
+import { Admonition } from '@oxy.so/bloom/admonition';
+import { AnimatedCheck, type AnimatedCheckRef } from '@oxy.so/bloom/animated-check';
+import { Card } from '@oxy.so/bloom/card';
+import { fontFamilies } from '@oxy.so/bloom/fonts';
+import { atoms as a } from '@oxy.so/bloom/styles';
+import { H1, Lead, Muted, Text } from '@oxy.so/bloom/typography';
+import { QRCodeSVG } from 'qrcode.react';
+import { useEffect, useRef } from 'react';
+import { View } from 'react-native';
+import { connectHomeAssistantAnimation } from './lottie/connect-home-assistant-animation';
+import { ThemedLottie } from './lottie/ThemedLottie';
+import { useOrchestratorStatus, type OrchestratorStage } from './useOrchestratorStatus';
 
 const STAGE_MESSAGE: Record<OrchestratorStage, string> = {
   onboarding: 'Preparando Willo Green…',
@@ -22,7 +22,7 @@ const STAGE_MESSAGE: Record<OrchestratorStage, string> = {
   // Deliberately reads as "found and kept your existing setup", not
   // "wiping and starting fresh".
   'existing-install': 'Importando configuración actual…',
-}
+};
 
 function ClaimCard({ claimCode }: { claimCode: string }) {
   return (
@@ -39,20 +39,20 @@ function ClaimCard({ claimCode }: { claimCode: string }) {
         </Muted>
       </View>
     </Card>
-  )
+  );
 }
 
 /** Mounted on the transition to `paired`, which is the moment the check should draw. */
 function PairedCheck() {
-  const check = useRef<AnimatedCheckRef>(null)
+  const check = useRef<AnimatedCheckRef>(null);
   useEffect(() => {
-    check.current?.play()
-  }, [])
-  return <AnimatedCheck ref={check} size={64} />
+    check.current?.play();
+  }, []);
+  return <AnimatedCheck ref={check} size={64} />;
 }
 
 function App() {
-  const status = useOrchestratorStatus()
+  const status = useOrchestratorStatus();
 
   return (
     <View style={[a.flex_1, a.align_center, a.justify_center, a.gap_xl, a.p_xl]}>
@@ -64,7 +64,9 @@ function App() {
       <H1>Willo</H1>
 
       {status.error !== null ? (
-        <Admonition type="error">Algo salió mal. Vuelve a intentarlo o contacta con soporte de Willo.</Admonition>
+        <Admonition type="error">
+          Algo salió mal. Vuelve a intentarlo o contacta con soporte de Willo.
+        </Admonition>
       ) : (
         <>
           <Lead style={a.text_center}>{STAGE_MESSAGE[status.stage]}</Lead>
@@ -77,7 +79,7 @@ function App() {
         </>
       )}
     </View>
-  )
+  );
 }
 
-export default App
+export default App;
