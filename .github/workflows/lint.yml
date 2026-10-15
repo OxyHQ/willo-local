@@ -12,6 +12,7 @@ jobs:
   biome:
     name: Biome (willo-claim-ui)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: willo-claim-ui
