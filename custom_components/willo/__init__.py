@@ -98,6 +98,13 @@ def _artwork_key(entity_picture: str | None) -> str | None:
     return hashlib.sha256(entity_picture.encode("utf-8")).hexdigest()[:16]
 
 
+def _volume_percent(volume_level: Any) -> int | None:
+    """Home Assistant's `volume_level` (0.0-1.0) as Willo's 0-100, `None` when unknown."""
+    if not isinstance(volume_level, (int, float)):
+        return None
+    return round(min(max(volume_level, 0.0), 1.0) * 100)
+
+
 def _capabilities_for(state: State, is_night: bool = False) -> list[dict[str, Any]] | None:
     domain = _domain_of(state.entity_id)
 
@@ -146,8 +153,11 @@ def _capabilities_for(state: State, is_night: bool = False) -> list[dict[str, An
         return [
             {
                 "kind": "media",
-                # Home Assistant's own vocabulary: playing, paused, idle, on, off, ...
-                "state": None if state.state in _UNKNOWN_STATES else state.state,
+                # Willo's media capability (`@willo.sh/shared-types`): the app's
+                # tile reads `playing` and `volume`; the frame's music card reads
+                # what is playing and the artwork's key.
+                "playing": state.state == "playing",
+                "volume": _volume_percent(state.attributes.get("volume_level")),
                 "title": state.attributes.get("media_title"),
                 "artist": state.attributes.get("media_artist"),
                 "album": state.attributes.get("media_album_name"),

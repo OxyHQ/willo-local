@@ -48,6 +48,7 @@ async def test_a_playing_player_sends_what_is_playing_and_only_a_hash_of_its_art
                 "media_title": "Teardrop",
                 "media_artist": "Massive Attack",
                 "media_album_name": "Mezzanine",
+                "volume_level": 0.42,
                 "entity_picture": PROXY_URL,
             },
         )
@@ -56,7 +57,9 @@ async def test_a_playing_player_sends_what_is_playing_and_only_a_hash_of_its_art
     [device] = _sent(emit)
     [media] = device["capabilities"]
     assert media["kind"] == "media"
-    assert media["state"] == "playing"
+    assert media["playing"] is True
+    assert media["volume"] == 42
+    assert "state" not in media
     assert (media["title"], media["artist"], media["album"]) == ("Teardrop", "Massive Attack", "Mezzanine")
     assert media["artworkKey"] and len(media["artworkKey"]) == 16
     # The proxy URL and its token stay here.
@@ -144,3 +147,15 @@ async def test_the_artwork_key_is_not_the_url(hass: HomeAssistant) -> None:
     assert willo._artwork_key("") is None
     key = willo._artwork_key(PROXY_URL)
     assert key is not None and key not in PROXY_URL and "token" not in key
+
+
+async def test_a_paused_player_is_not_playing_and_an_unknown_volume_is_none(hass: HomeAssistant) -> None:
+    with patch.object(socketio.AsyncClient, "emit", new=AsyncMock()) as emit:
+        await _setup(hass)
+        hass.states.async_set("media_player.studio", "paused", {"media_title": "Teardrop"})
+        await hass.async_block_till_done()
+
+    [device] = _sent(emit)
+    [media] = device["capabilities"]
+    assert media["playing"] is False
+    assert media["volume"] is None
