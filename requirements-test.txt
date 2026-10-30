@@ -1,0 +1,8 @@
+# The test harness for custom_components/willo: a real, minimal in-process
+# Home Assistant per test (pytest-homeassistant-custom-component pins the
+# matching homeassistant release). PyTurboJPEG is the camera component's own
+# requirement, which the integration imports. Bump the harness to follow the
+# Home Assistant release Willo supports.
+pytest-homeassistant-custom-component==0.13.375
+PyTurboJPEG==2.6.1
+python-socketio[asyncio_client]==5.17.0
