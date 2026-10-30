@@ -1,7 +1,7 @@
 {
   "domain": "willo",
   "name": "Willo",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "documentation": "https://github.com/OxyHQ/willo-ha",
   "issue_tracker": "https://github.com/OxyHQ/willo-ha/issues",
   "codeowners": ["@OxyHQ"],
