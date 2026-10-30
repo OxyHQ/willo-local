@@ -1,0 +1,31 @@
+# The integration's tests, against a real in-process Home Assistant
+# (pytest-homeassistant-custom-component). No path filter: a required check
+# must report on every pull request.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      # Home Assistant 2026.10 runs on Python 3.14.
+      - run: uv venv --python 3.14
+      - run: uv pip install -r requirements-test.txt
+      - run: uv run --no-project python -m pytest tests -q

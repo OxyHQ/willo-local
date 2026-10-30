@@ -1,7 +1,8 @@
 """Shared fixtures for willo-ha's tests.
 
-Run with: pip install pytest-homeassistant-custom-component, then
-`pytest tests/` from the repo root. This uses the real
+Run with: `uv venv --python 3.14 && uv pip install -r requirements-test.txt`,
+then `uv run --no-project python -m pytest tests` from the repo root (what
+.github/workflows/tests.yml does). This uses the real
 `pytest-homeassistant-custom-component` harness (a real, minimal
 in-process HomeAssistant instance per test — not a mock of HA itself),
 matching how the wider HA custom-component ecosystem tests integrations.
