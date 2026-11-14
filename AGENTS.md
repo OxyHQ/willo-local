@@ -25,6 +25,7 @@ bun run --cwd willo-claim-ui build   # claim UI; the orchestrator serves its dis
 - The orchestrator never deletes the `frontend` component; the README section "Cleanup deletion" explains why. Read it before editing `orchestrator/willo_orchestrator/cleanup.py`.
 - Tests use a real in-process Home Assistant (`pytest-homeassistant-custom-component`), not a mock of HA. Bump that pin only together with the Home Assistant release Willo supports.
 - The integration opens one outbound connection; never add inbound ports, URLs or certificates for users to configure.
+- First-party never asks people for permissions: this app acts for a person with `actingFor` on what oxy's first-party registry declares (oxy ADR 0066); permissions, scopes and consent are only for third parties.
 - Biome (`bunx biome ci .`) checks the claim UI; general Oxy rules: [engineering standards](https://github.com/OxyHQ/engineering/blob/main/AGENTS.md).
 
 ## Boundaries
